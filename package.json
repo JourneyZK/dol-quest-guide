@@ -1,0 +1,13 @@
+{
+  "name": "dol-quest-guide",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "check": "node --check server.mjs && node --check app.js && node --check tools/import-gvdb.mjs && node --check tools/import-bahamut.mjs && node --check tools/market-lookup.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>大航海时代任务向导</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+    <script src="./data/quests.js" defer></script>
+    <script src="./app.js?v=20260505-market" defer></script>
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar" aria-label="任务检索">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">航</div>
+          <div>
+            <h1>任务向导</h1>
+            <p>大航海时代</p>
+          </div>
+        </div>
+
+        <form class="search-panel" id="quest-form">
+          <label for="quest-input">输入任务</label>
+          <textarea
+            id="quest-input"
+            rows="5"
+            placeholder="例如：商人への転職 / ワインをロンドンへ届ける / 海賊討伐"
+          ></textarea>
+
+          <div class="filter-row" role="group" aria-label="任务类型">
+            <button class="chip active" type="button" data-filter="all">全部</button>
+            <button class="chip" type="button" data-filter="trade">交易</button>
+            <button class="chip" type="button" data-filter="adventure">冒险</button>
+            <button class="chip" type="button" data-filter="battle">战斗</button>
+            <button class="chip" type="button" data-filter="story">主线</button>
+          </div>
+
+          <button class="primary-action" type="submit">
+            <i data-lucide="route" aria-hidden="true"></i>
+            生成步骤
+          </button>
+        </form>
+
+        <section class="library-panel" aria-labelledby="library-title">
+          <div class="panel-heading">
+            <h2 id="library-title">任务库</h2>
+            <span id="quest-count"></span>
+          </div>
+          <div class="quest-list" id="quest-list"></div>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <section class="topbar" aria-label="工具栏">
+          <div class="status-strip">
+            <span class="status-dot"></span>
+            <span id="match-status">等待输入任务</span>
+          </div>
+          <div class="toolbar">
+            <button class="icon-button" id="copy-btn" type="button" title="复制步骤" aria-label="复制步骤">
+              <i data-lucide="copy" aria-hidden="true"></i>
+            </button>
+            <button class="icon-button" id="export-btn" type="button" title="导出任务库" aria-label="导出任务库">
+              <i data-lucide="download" aria-hidden="true"></i>
+            </button>
+            <label class="icon-button file-button" title="导入任务库" aria-label="导入任务库">
+              <i data-lucide="upload" aria-hidden="true"></i>
+              <input id="import-file" type="file" accept="application/json,text/csv,text/tab-separated-values,.json,.csv,.tsv" />
+            </label>
+          </div>
+        </section>
+
+        <section class="quest-brief" id="quest-brief" aria-live="polite">
+          <div class="map-card" aria-hidden="true">
+            <div class="compass">
+              <span>N</span>
+              <span>E</span>
+              <span>S</span>
+              <span>W</span>
+            </div>
+            <div class="route-line"></div>
+            <div class="port port-a"></div>
+            <div class="port port-b"></div>
+            <div class="port port-c"></div>
+          </div>
+
+          <div class="brief-copy">
+            <p class="eyebrow">Voyage Planner</p>
+            <h2>输入任务名，生成可执行航线</h2>
+            <p>
+              用本地服务启动后，输入日服任务名会自动查询 GVDB；查到后会生成中文步骤和航行路线图。
+            </p>
+          </div>
+        </section>
+
+        <section class="result-grid">
+          <article class="result-main" aria-labelledby="result-title">
+            <div class="result-heading">
+              <div>
+                <p class="eyebrow" id="result-type">未选择</p>
+                <h2 id="result-title">任务步骤</h2>
+              </div>
+              <span class="confidence" id="confidence">匹配度 -</span>
+            </div>
+
+            <div class="meta-grid" id="meta-grid"></div>
+            <section class="route-section" aria-labelledby="route-title">
+              <div class="route-heading">
+                <h3 id="route-title">航行路线图</h3>
+                <span id="route-summary">等待路线</span>
+              </div>
+              <div class="route-map" id="route-map"></div>
+              <form class="position-panel" id="position-form">
+                <label>
+                  游戏 X
+                  <input id="position-game-x" type="number" step="1" min="0" max="16384" placeholder="16058" />
+                </label>
+                <label>
+                  游戏 Y
+                  <input id="position-game-y" type="number" step="1" min="0" max="8192" placeholder="3317" />
+                </label>
+                <div class="position-copy">
+                  <strong>实时船位</strong>
+                  <span id="position-status">未接收坐标</span>
+                </div>
+                <label>
+                  纬度
+                  <input id="position-lat" type="number" step="0.0001" min="-90" max="90" placeholder="例如 36.75" />
+                </label>
+                <label>
+                  经度
+                  <input id="position-lon" type="number" step="0.0001" min="-180" max="180" placeholder="例如 3.06" />
+                </label>
+                <button type="submit">显示船位</button>
+                <button id="position-clear" type="button">清除</button>
+              </form>
+            </section>
+            <ol class="steps" id="steps"></ol>
+          </article>
+
+          <aside class="detail-stack" aria-label="任务细节">
+            <section class="detail-block market-block">
+              <h3>交易查询</h3>
+              <form class="market-form" id="market-form">
+                <div class="market-mode" role="group" aria-label="交易查询类型">
+                  <label>
+                    <input type="radio" name="market-mode" value="item" checked />
+                    查物品
+                  </label>
+                  <label>
+                    <input type="radio" name="market-mode" value="port" />
+                    查港口
+                  </label>
+                </div>
+                <input id="market-query" type="search" placeholder="猪肉 / 豚肉 / 奥波多" />
+                <button class="secondary-action" type="submit">
+                  <i data-lucide="search" aria-hidden="true"></i>
+                  查询
+                </button>
+              </form>
+              <div class="market-results" id="market-results">
+                <p>输入物品名可查哪里出售；输入港口名可查当地卖什么。</p>
+              </div>
+            </section>
+            <section class="detail-block">
+              <h3>准备清单</h3>
+              <ul id="prep-list"></ul>
+            </section>
+            <section class="detail-block">
+              <h3>注意事项</h3>
+              <ul id="notes-list"></ul>
+            </section>
+            <section class="detail-block">
+              <h3>任务库编辑</h3>
+              <button class="secondary-action" id="save-generated-btn" type="button">
+                <i data-lucide="plus" aria-hidden="true"></i>
+                存入任务库
+              </button>
+              <button class="secondary-action" id="reset-btn" type="button">
+                <i data-lucide="refresh-ccw" aria-hidden="true"></i>
+                恢复示例库
+              </button>
+            </section>
+          </aside>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

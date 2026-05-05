@@ -1,0 +1,24 @@
+# Local runtime files
+data/market-cache.json
+data/ocr-*
+data/position-gamecoord-preview.png
+data/route-map-*.png
+
+# Generated imports and temporary exports
+data/bahamut-import*.json
+data/gvdb-import.json
+*.log
+tmp/
+temp/
+
+# Dependencies and environment
+node_modules/
+.env
+.env.*
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
