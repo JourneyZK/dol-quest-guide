@@ -9,6 +9,7 @@ import { lookupMarket } from "./tools/market-lookup.mjs";
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || 8765);
+const calibrationPath = path.join(rootDir, "data", "map-calibrations.json");
 let currentPosition = null;
 
 const mimeTypes = {
@@ -32,6 +33,10 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === "/api/position") {
       await handlePosition(req, res);
+      return;
+    }
+    if (url.pathname === "/api/calibrations") {
+      await handleCalibrations(req, res);
       return;
     }
     if (url.pathname === "/api/market") {
@@ -147,6 +152,76 @@ async function handlePosition(req, res) {
     updatedAt: new Date().toISOString()
   };
   sendJson(res, 200, { position: currentPosition });
+}
+
+async function handleCalibrations(req, res) {
+  if (req.method === "GET") {
+    sendJson(res, 200, { anchors: await readCalibrationAnchors() });
+    return;
+  }
+
+  if (req.method === "DELETE") {
+    await writeCalibrationAnchors([]);
+    sendJson(res, 200, { anchors: [] });
+    return;
+  }
+
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method not allowed" });
+    return;
+  }
+
+  const body = await readBody(req);
+  const anchors = normalizeCalibrationAnchors(body.anchors);
+  await writeCalibrationAnchors(anchors);
+  sendJson(res, 200, { anchors });
+}
+
+async function readCalibrationAnchors() {
+  try {
+    const raw = JSON.parse(await fs.readFile(calibrationPath, "utf8"));
+    return normalizeCalibrationAnchors(Array.isArray(raw) ? raw : raw.anchors);
+  } catch {
+    return [];
+  }
+}
+
+async function writeCalibrationAnchors(anchors) {
+  await fs.mkdir(path.dirname(calibrationPath), { recursive: true });
+  await fs.writeFile(calibrationPath, JSON.stringify(normalizeCalibrationAnchors(anchors), null, 2), "utf8");
+}
+
+function normalizeCalibrationAnchors(anchors) {
+  if (!Array.isArray(anchors)) return [];
+  const byId = new Map();
+  anchors.forEach((anchor) => {
+    const normalized = normalizeCalibrationAnchor(anchor);
+    if (normalized) byId.set(normalized.id, normalized);
+  });
+  return Array.from(byId.values()).slice(0, 40);
+}
+
+function normalizeCalibrationAnchor(anchor) {
+  if (!anchor) return null;
+  const gameX = Number(anchor.gameX);
+  const gameY = Number(anchor.gameY);
+  const lon = Number(anchor.lon);
+  const lat = Number(anchor.lat);
+  const hasGameCoord = Number.isFinite(gameX) && gameX >= 0 && gameX <= 16384 && Number.isFinite(gameY) && gameY >= 0 && gameY <= 8192;
+  const hasLatLon = Number.isFinite(lat) && lat >= -90 && lat <= 90 && Number.isFinite(lon) && lon >= -180 && lon <= 180;
+  if (!hasGameCoord || !hasLatLon) return null;
+  const label = String(anchor.label || "校准点").slice(0, 40);
+  const id = String(anchor.id || label || `${Math.round(gameX)}-${Math.round(gameY)}`).slice(0, 80);
+  return {
+    id,
+    label,
+    gameX: Math.round(gameX),
+    gameY: Math.round(gameY),
+    lon,
+    lat,
+    source: "calibration",
+    createdAt: anchor.createdAt || new Date().toISOString()
+  };
 }
 
 function normalizePositionPayload(body) {

@@ -852,6 +852,7 @@
     updateCalibrationStatus();
     bindMarketControls();
     startPositionPolling();
+    initializeCalibrationSync();
 
     if (window.lucide) {
       window.lucide.createIcons();
@@ -1228,6 +1229,44 @@
 
   function saveCalibrationAnchors() {
     localStorage.setItem(CALIBRATION_STORAGE_KEY, JSON.stringify(state.calibrationAnchors));
+    syncCalibrationAnchorsToServer();
+  }
+
+  async function initializeCalibrationSync() {
+    if (!canUseLocalApi()) return;
+    if (state.calibrationAnchors.length) {
+      syncCalibrationAnchorsToServer();
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/calibrations", { cache: "no-store" });
+      if (!response.ok) return;
+      const payload = await response.json();
+      const anchors = ensureArray(payload.anchors).map(normalizeCalibrationAnchor).filter(Boolean);
+      if (!anchors.length) return;
+      state.calibrationAnchors = anchors.slice(0, 40);
+      localStorage.setItem(CALIBRATION_STORAGE_KEY, JSON.stringify(state.calibrationAnchors));
+      updateCalibrationStatus();
+      await refreshCurrentGamePositionAfterCalibrationChange("game");
+    } catch {
+      // Calibration still works locally when the web service is unavailable.
+    }
+  }
+
+  async function syncCalibrationAnchorsToServer() {
+    if (!canUseLocalApi()) return;
+    try {
+      await fetch("/api/calibrations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ anchors: state.calibrationAnchors })
+      });
+    } catch {
+      // Browser storage remains the source of truth if the local API is down.
+    }
   }
 
   function deleteCalibrationAnchor(id) {

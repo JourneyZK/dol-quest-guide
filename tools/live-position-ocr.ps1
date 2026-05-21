@@ -46,6 +46,8 @@ $script:RejectedJumpCount = 0
 $script:MissingCoordinateCount = 0
 $script:WasCoordinateHidden = $false
 $script:UseTemplates = $UseTemplates -and -not $NoTemplates
+$script:CalibrationAnchors = @()
+$script:LastCalibrationRefresh = [datetime]::MinValue
 
 Add-Type -TypeDefinition @"
 using System;
@@ -1343,6 +1345,48 @@ function Get-CoordinateDistance($Left, $Right) {
   return $dx + $dy
 }
 
+function Update-CalibrationAnchors {
+  if ($NoPost) { return }
+  $age = ((Get-Date) - $script:LastCalibrationRefresh).TotalSeconds
+  if ($age -lt 30) { return }
+  $script:LastCalibrationRefresh = Get-Date
+
+  try {
+    $payload = Invoke-RestMethod -Uri "$ServerUrl/api/calibrations" -Method Get -TimeoutSec 1
+    $anchors = @()
+    foreach ($anchor in @($payload.anchors)) {
+      if (-not $anchor) { continue }
+      $gameX = [double]$anchor.gameX
+      $gameY = [double]$anchor.gameY
+      if (-not [double]::IsNaN($gameX) -and -not [double]::IsNaN($gameY) -and $gameX -ge 0 -and $gameX -le 16384 -and $gameY -ge 0 -and $gameY -le 8192) {
+        $anchors += [pscustomobject]@{
+          label = [string]$anchor.label
+          gameX = [int][Math]::Round($gameX)
+          gameY = [int][Math]::Round($gameY)
+        }
+      }
+    }
+    $script:CalibrationAnchors = $anchors
+  } catch {
+    # OCR can still run without calibration assist.
+  }
+}
+
+function Get-NearestCalibrationAnchor($Coordinate) {
+  Update-CalibrationAnchors
+  $nearest = $null
+  foreach ($anchor in @($script:CalibrationAnchors)) {
+    $distance = Get-CoordinateDistance $Coordinate $anchor
+    if (-not $nearest -or $distance -lt $nearest.distance) {
+      $nearest = [pscustomobject]@{
+        anchor = $anchor
+        distance = $distance
+      }
+    }
+  }
+  return $nearest
+}
+
 function New-StabilityResult([bool]$Accepted, [string]$Reason) {
   return [pscustomobject]@{
     accepted = $Accepted
@@ -1350,9 +1394,36 @@ function New-StabilityResult([bool]$Accepted, [string]$Reason) {
   }
 }
 
+function Test-CalibrationAssistedCoordinate($Coordinate) {
+  $nearest = Get-NearestCalibrationAnchor $Coordinate
+  if (-not $nearest) { return $null }
+
+  $votes = [int]$Coordinate.votes
+  $distance = [int]$nearest.distance
+  $label = if ($nearest.anchor.label) { $nearest.anchor.label } else { "校准港口" }
+
+  if ($distance -le 60 -and $votes -ge 1) {
+    return New-StabilityResult $true ("calibration:{0}:{1}" -f $label, $distance)
+  }
+  if ($distance -le 130 -and $votes -ge 2) {
+    return New-StabilityResult $true ("calibration-near:{0}:{1}" -f $label, $distance)
+  }
+  if ($distance -le 240 -and $votes -ge 4) {
+    return New-StabilityResult $true ("calibration-trusted:{0}:{1}" -f $label, $distance)
+  }
+
+  return $null
+}
+
 function Test-StableCoordinate($Coordinate) {
   if ($NoStable -or $ImagePath -or $Once) {
     return New-StabilityResult $true "stable-off"
+  }
+
+  $calibrated = Test-CalibrationAssistedCoordinate $Coordinate
+  if ($calibrated) {
+    Clear-PendingCoordinateState
+    return $calibrated
   }
 
   if (-not $script:LastSentCoordinate) {
@@ -1536,6 +1607,7 @@ if ($ResetTemplates -and (Test-Path $TemplatePath)) {
 
 $tesseract = Find-Tesseract
 Ensure-LocalServer
+Update-CalibrationAnchors
 $region = Get-ConfiguredRegion
 
 if ($TrainText) {
@@ -1558,6 +1630,7 @@ if ($NoStable) {
   Write-Host "Stable mode is off. Every recognized coordinate will be sent."
 } else {
   Write-Host "Stable mode is on. WAIT means a suspicious one-frame reading was not sent."
+  Write-Host ("Calibration assist is on. Loaded {0} calibrated port(s) from the map." -f @($script:CalibrationAnchors).Count)
 }
 if ($HighAccuracy) {
   Write-Host "High accuracy mode is on. If the game feels laggy, restart OCR and choose low load mode."
