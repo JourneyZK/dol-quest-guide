@@ -1147,7 +1147,13 @@
       return;
     }
     const labels = state.calibrationAnchors.slice(0, 3).map((anchor) => anchor.label).join("、");
-    els.calibrationStatus.textContent = `已校准 ${count} 点：${labels}${count > 3 ? "…" : ""}`;
+    const hint =
+      count === 1
+        ? "；单点只修正附近"
+        : count === 2
+          ? "；再加 1 点更稳"
+          : "；区域校准";
+    els.calibrationStatus.textContent = `已校准 ${count} 点：${labels}${count > 3 ? "…" : ""}${hint}`;
   }
 
   function loadQuests() {
@@ -1450,7 +1456,13 @@
       label: String(position.label || "当前船位").slice(0, 40),
       source: String(position.source || (hasGameCoord ? "game" : "manual")).slice(0, 40),
       updatedAt: position.updatedAt || new Date().toISOString(),
-      conversion: converted ? { anchors: converted.anchors, confidence: converted.confidence } : position.conversion
+      conversion: converted
+        ? {
+            anchors: converted.anchors,
+            confidence: converted.confidence,
+            calibrationInfluence: converted.calibrationInfluence
+          }
+        : position.conversion
     };
   }
 
@@ -1479,7 +1491,9 @@
     }
     const calibrationNames = position.conversion?.anchors?.filter((name) => String(name).startsWith("校准:")) || [];
     if (calibrationNames.length) {
-      parts.push(`使用${calibrationNames[0].replace("校准:", "")}校准`);
+      const influence = Number(position.conversion?.calibrationInfluence);
+      const suffix = Number.isFinite(influence) ? ` ${Math.round(influence * 100)}%` : "";
+      parts.push(`使用${calibrationNames[0].replace("校准:", "")}校准${suffix}`);
     }
     return parts.join(" | ");
   }
@@ -1535,6 +1549,7 @@
 
     const x = normalizeGameX(gameX);
     const y = Number(gameY);
+    const calibrationCount = calibrations.length;
     const nearby = calibrations
       .map((anchor) => {
         const unwrappedX = unwrapGameX(anchor.gameX, x);
@@ -1544,12 +1559,16 @@
       .sort((left, right) => left.distance - right.distance)
       .slice(0, 6);
 
-    if (!nearby.length || nearby[0].distance > 2600) return null;
+    if (!nearby.length) return null;
+    const nearestDistance = nearby[0].distance;
+    const influence = getCalibrationInfluence(nearestDistance, calibrationCount);
+    if (influence <= 0) return null;
     if (nearby[0].distance <= 0.5) {
       return {
         lat: nearby[0].anchor.lat,
         lon: nearby[0].anchor.lon,
         confidence: 1,
+        calibrationInfluence: 1,
         anchors: [`校准:${nearby[0].anchor.label}`]
       };
     }
@@ -1567,16 +1586,28 @@
     });
     if (!totalWeight) return null;
 
-    const nearestDistance = nearby[0].distance;
+    const offsetLat = (latOffset / totalWeight) * influence;
+    const offsetLon = (lonOffset / totalWeight) * influence;
     return {
-      lat: clampNumber(basePosition.lat + latOffset / totalWeight, -85, 85),
-      lon: normalizeLon(basePosition.lon + lonOffset / totalWeight),
-      confidence: Math.max(basePosition.confidence || 0.25, Math.max(0.35, 1 - nearestDistance / 1800)),
+      lat: clampNumber(basePosition.lat + offsetLat, -85, 85),
+      lon: normalizeLon(basePosition.lon + offsetLon),
+      confidence: Math.max(basePosition.confidence || 0.25, Math.max(0.35, influence)),
+      calibrationInfluence: influence,
       anchors: [
         ...nearby.slice(0, 3).map((item) => `校准:${item.anchor.label}`),
         ...(basePosition.anchors || []).slice(0, 2)
       ]
     };
+  }
+
+  function getCalibrationInfluence(distance, calibrationCount) {
+    if (!Number.isFinite(distance)) return 0;
+    const fullRadius = calibrationCount >= 3 ? 220 : calibrationCount === 2 ? 160 : 90;
+    const maxRadius = calibrationCount >= 3 ? 2600 : calibrationCount === 2 ? 1500 : 700;
+    if (distance <= fullRadius) return 1;
+    if (distance >= maxRadius) return 0;
+    const t = (distance - fullRadius) / (maxRadius - fullRadius);
+    return Math.max(0, Math.min(1, Math.pow(1 - t, 2)));
   }
 
   function solveWeightedAffine(points, valueKey, originX, originY) {
