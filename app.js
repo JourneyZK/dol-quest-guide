@@ -646,6 +646,14 @@
     英吉利海峡西口: seaPoint("英吉利海峡西口", -3.5, 49.7),
     多佛海峡: seaPoint("多佛海峡", 1.25, 51.0),
     北海南部: seaPoint("北海南部", 3.3, 52.4),
+    日德兰西岸外海: seaPoint("日德兰西岸外海", 7.4, 55.1),
+    斯卡格拉克海峡: seaPoint("斯卡格拉克海峡", 9.2, 57.5),
+    卡特加特海峡: seaPoint("卡特加特海峡", 11.4, 56.4),
+    厄勒海峡: seaPoint("厄勒海峡", 12.55, 55.75),
+    哥本哈根外海: seaPoint("哥本哈根外海", 12.65, 55.72),
+    哥德堡外海: seaPoint("哥德堡外海", 11.75, 57.7),
+    奥斯陆峡湾外海: seaPoint("奥斯陆峡湾外海", 10.45, 58.9),
+    波罗的海西口: seaPoint("波罗的海西口", 14.1, 55.3),
     直布罗陀海峡西口: seaPoint("直布罗陀海峡西口", -6.0, 35.85),
     直布罗陀海峡东口: seaPoint("直布罗陀海峡东口", -4.25, 36.0),
     阿尔沃兰海: seaPoint("阿尔沃兰海", -2.6, 36.2),
@@ -708,6 +716,17 @@
     ["比斯开湾西南", "比斯开湾外海", "比斯开湾北部"],
     ["多佛海峡", "加来外海"],
     ["英吉利海峡西口", "康沃尔外海"],
+    [
+      "北海南部",
+      "日德兰西岸外海",
+      "斯卡格拉克海峡",
+      "卡特加特海峡",
+      "厄勒海峡",
+      "哥本哈根外海",
+      "波罗的海西口"
+    ],
+    ["卡特加特海峡", "哥德堡外海"],
+    ["斯卡格拉克海峡", "奥斯陆峡湾外海"],
     [
       "直布罗陀海峡东口",
       "阿尔沃兰海",
@@ -2154,6 +2173,24 @@
     const layer = window.L.layerGroup();
     const routePoints = routePlan?.points?.length ? routePlan.points : knownStops.map((stop) => stop.coord);
     const latLngs = routePoints.map((point) => [point.lat, point.lon]);
+    routePoints
+      .filter((point) => point.kind === "port" && Number.isFinite(point.actualLat) && Number.isFinite(point.actualLon))
+      .filter((point) => Math.abs(point.actualLat - point.lat) > 0.01 || Math.abs(point.actualLon - point.lon) > 0.01)
+      .forEach((point) => {
+        window.L.polyline(
+          [
+            [point.actualLat, point.actualLon],
+            [point.lat, point.lon]
+          ],
+          {
+            color: "#c24b35",
+            dashArray: "4 6",
+            opacity: 0.68,
+            weight: 2.5
+          }
+        ).addTo(layer);
+      });
+
     window.L.polyline(latLngs, {
       color: "#ffffff",
       opacity: 0.84,
@@ -2500,6 +2537,13 @@
       普利茅斯: ["康沃尔外海"],
       朴茨茅斯: ["怀特岛外海"],
       加来: ["加来外海"],
+      哥本哈根: ["哥本哈根外海"],
+      哥德堡: ["哥德堡外海"],
+      奥斯陆: ["奥斯陆峡湾外海"],
+      斯德哥尔摩: ["波罗的海西口"],
+      维斯比: ["波罗的海西口"],
+      里加: ["波罗的海西口"],
+      但泽: ["波罗的海西口"],
       阿尔及尔: ["阿尔及尔外海"],
       亚历山大: ["尼罗河口外海"],
       苏伊士: ["苏伊士湾"],
@@ -2692,6 +2736,15 @@
     const oceanLabels = buildOceanLabels();
     const ports = buildMapPortDots(routePointKeys);
     const routePoints = routePlan?.points?.length ? routePlan.points : knownStops.map((stop) => stop.coord);
+    const approachPaths = routePoints
+      .filter((point) => point.kind === "port" && Number.isFinite(point.actualLat) && Number.isFinite(point.actualLon))
+      .filter((point) => Math.abs(point.actualLat - point.lat) > 0.01 || Math.abs(point.actualLon - point.lon) > 0.01)
+      .map((point) => {
+        const actual = projectLonLat(point.actualLon, point.actualLat);
+        const access = projectLonLat(point.lon, point.lat);
+        return `<path class="approach-route" d="M ${actual.x} ${actual.y} L ${access.x} ${access.y}"></path>`;
+      })
+      .join("");
     const waypointMarkers = routePoints
       .filter((point) => point.kind === "waypoint")
       .map(
@@ -2750,6 +2803,7 @@
         ${oceanLabels}
         ${land}
         ${ports}
+        ${approachPaths}
         ${segments}
         ${waypointMarkers}
         ${markers}
