@@ -24,11 +24,15 @@ $TemplatePath = Join-Path $DataDir "ocr-digit-templates.json"
 $CapturePath = Join-Path $DataDir "ocr-capture.png"
 $OcrImagePath = Join-Path $DataDir "ocr-last.png"
 $PreviewPath = Join-Path $DataDir "ocr-preview.png"
+$LastCandidatePath = Join-Path $DataDir "ocr-last-candidate.png"
 $ServerUrl = "http://127.0.0.1:8765"
 $MinRegionWidth = 80
 $MinRegionHeight = 18
+$MaxCandidateAgeSeconds = 120
 $script:LastCoordinate = $null
 $script:LastSentCoordinate = $null
+$script:LastCandidateCoordinate = $null
+$script:LastCandidateAt = $null
 $script:PendingCoordinate = $null
 $script:PendingCount = 0
 $script:RejectedJumpCount = 0
@@ -1186,6 +1190,88 @@ function Send-Position($Coordinate) {
   Invoke-RestMethod -Uri "$ServerUrl/api/position" -Method Post -ContentType "application/json; charset=utf-8" -Body $body | Out-Null
 }
 
+function Format-GameCoordinate($Coordinate) {
+  if (-not $Coordinate) { return "" }
+  return "{0},{1}" -f ([int]$Coordinate.gameX), ([int]$Coordinate.gameY)
+}
+
+function New-ManualCoordinateFromText([string]$Text) {
+  $labelText = Normalize-TrainingText $Text
+  if (-not $labelText) { return $null }
+  $parts = $labelText.Split(",")
+  return [pscustomobject]@{
+    gameX = [int]$parts[0]
+    gameY = [int]$parts[1]
+    raw = $labelText
+    score = 99
+    method = "manual"
+    votes = 99
+  }
+}
+
+function Save-LastCandidate($Coordinate, [string]$ImagePath) {
+  if (-not $Coordinate -or -not $ImagePath -or -not (Test-Path $ImagePath)) { return }
+  Copy-Item -LiteralPath $ImagePath -Destination $LastCandidatePath -Force
+  $script:LastCandidateCoordinate = $Coordinate
+  $script:LastCandidateAt = Get-Date
+}
+
+function Test-LastCandidateFresh {
+  if (-not $script:LastCandidateCoordinate -or -not $script:LastCandidateAt) { return $false }
+  $age = ((Get-Date) - $script:LastCandidateAt).TotalSeconds
+  return $age -le $MaxCandidateAgeSeconds
+}
+
+function Approve-Coordinate($Coordinate, [string]$LabelText, [string]$Mode) {
+  Clear-PendingCoordinateState
+  $script:LastCoordinate = $Coordinate
+  $script:LastSentCoordinate = $Coordinate
+  Send-Position $Coordinate
+  Write-Host ("{0:HH:mm:ss}  ACCEPT {1}  {2}; sent to map." -f (Get-Date), (Format-GameCoordinate $Coordinate), $Mode)
+
+  if (Test-Path $LastCandidatePath) {
+    if (Add-TemplatesFromImage $LastCandidatePath $LabelText) {
+      Write-Host "Accepted coordinate was added to OCR training."
+    } else {
+      Write-Host "Coordinate was accepted, but training was not saved. You can press T and type the coordinate manually."
+    }
+  } else {
+    Write-Host "Coordinate was accepted, but no saved image was available for training."
+  }
+}
+
+function Invoke-AcceptLastCandidate {
+  if (-not (Test-LastCandidateFresh)) {
+    Write-Host ("{0:HH:mm:ss}  No recent OCR reading to accept. Wait for the next WAIT/OK line, then press A." -f (Get-Date))
+    return
+  }
+  $labelText = Format-GameCoordinate $script:LastCandidateCoordinate
+  Approve-Coordinate $script:LastCandidateCoordinate $labelText "manual-confirm"
+}
+
+function Invoke-CorrectLastCandidate {
+  if (-not (Test-LastCandidateFresh)) {
+    Write-Host ("{0:HH:mm:ss}  No recent OCR reading to correct. Wait for the next WAIT/OK line, then press M." -f (Get-Date))
+    return
+  }
+
+  $lastText = Format-GameCoordinate $script:LastCandidateCoordinate
+  Write-Host ("Last OCR reading: {0}  raw={1}" -f $lastText, $script:LastCandidateCoordinate.raw)
+  $text = Read-Host "Type the correct coordinate, or press Enter to cancel"
+  if (-not ($text -replace "\s", "")) {
+    Write-Host "Manual correction cancelled."
+    return
+  }
+
+  $coordinate = New-ManualCoordinateFromText $text
+  if (-not $coordinate) {
+    Write-Host "Input rejected. Use English comma and digits only, like 16058,3317."
+    return
+  }
+
+  Approve-Coordinate $coordinate (Format-GameCoordinate $coordinate) "manual-correction"
+}
+
 function Get-CoordinateDistance($Left, $Right) {
   if (-not $Left -or -not $Right) { return [double]::PositiveInfinity }
   $dx = [Math]::Abs([int]$Left.gameX - [int]$Right.gameX)
@@ -1269,6 +1355,8 @@ function Test-StableCoordinate($Coordinate) {
 function Reset-TrackingState {
   $script:LastCoordinate = $null
   $script:LastSentCoordinate = $null
+  $script:LastCandidateCoordinate = $null
+  $script:LastCandidateAt = $null
   $script:PendingCoordinate = $null
   $script:PendingCount = 0
   $script:RejectedJumpCount = 0
@@ -1312,6 +1400,8 @@ function Get-ConsoleHotkey {
       $key = [Console]::ReadKey($true)
       if ($key.Key -eq [ConsoleKey]::R) { return "rechoose" }
       if ($key.Key -eq [ConsoleKey]::C) { return "clear" }
+      if ($key.Key -eq [ConsoleKey]::A) { return "accept" }
+      if ($key.Key -eq [ConsoleKey]::M) { return "correct" }
       if ($key.Key -eq [ConsoleKey]::T) { return "train" }
       if ($key.Key -eq [ConsoleKey]::X) { return "clearTemplates" }
       if ($key.Key -eq [ConsoleKey]::V) { return "toggleTemplates" }
@@ -1402,6 +1492,7 @@ if ($NoStable) {
 Write-Host "When you enter a port and coordinates disappear, OCR will pause quietly and resume after departure."
 Write-Host "Template recognition is off by default because raw OCR is more stable for small coordinates."
 Write-Host "Press R to re-select the OCR area. Press C to clear the stable coordinate state."
+Write-Host "Press A to accept the last WAIT/OK coordinate and train it. Press M to type the correct coordinate for the last reading."
 Write-Host "Press T to train digit templates. Press X to clear digit templates. Press V to toggle templates."
 Write-Host "Close this window, or press Ctrl+C, to stop."
 Write-Host ""
@@ -1414,6 +1505,10 @@ do {
       continue
     } elseif ($hotkey -eq "clear") {
       Invoke-ClearTrackingState
+    } elseif ($hotkey -eq "accept") {
+      Invoke-AcceptLastCandidate
+    } elseif ($hotkey -eq "correct") {
+      Invoke-CorrectLastCandidate
     } elseif ($hotkey -eq "train") {
       Invoke-TrainTemplates $region
       continue
@@ -1433,6 +1528,7 @@ do {
     $ocrRegion = if ($ImagePath) { $region } else { $null }
     $coordinate = Read-GameCoordinate $tesseract $inputPath $ocrRegion
     if ($coordinate) {
+      Save-LastCandidate $coordinate $inputPath
       Reset-MissingCoordinateState
       $script:LastCoordinate = $coordinate
       $stability = Test-StableCoordinate $coordinate
@@ -1441,7 +1537,7 @@ do {
         Send-Position $coordinate
         Write-Host ("{0:HH:mm:ss}  OK    {1},{2}  votes={3}  {4}  raw={5}" -f (Get-Date), $coordinate.gameX, $coordinate.gameY, $coordinate.votes, $stability.reason, $coordinate.raw)
       } else {
-        Write-Host ("{0:HH:mm:ss}  WAIT  {1},{2}  votes={3}  {4}  raw={5}" -f (Get-Date), $coordinate.gameX, $coordinate.gameY, $coordinate.votes, $stability.reason, $coordinate.raw)
+        Write-Host ("{0:HH:mm:ss}  WAIT  {1},{2}  votes={3}  {4}  raw={5}  press A=accept M=correct" -f (Get-Date), $coordinate.gameX, $coordinate.gameY, $coordinate.votes, $stability.reason, $coordinate.raw)
       }
     } else {
       Invoke-MissingCoordinateState
@@ -1460,6 +1556,10 @@ do {
     $region = Invoke-RechooseRegion
   } elseif ($hotkey -eq "clear") {
     Invoke-ClearTrackingState
+  } elseif ($hotkey -eq "accept") {
+    Invoke-AcceptLastCandidate
+  } elseif ($hotkey -eq "correct") {
+    Invoke-CorrectLastCandidate
   } elseif ($hotkey -eq "train") {
     Invoke-TrainTemplates $region
   } elseif ($hotkey -eq "clearTemplates") {
