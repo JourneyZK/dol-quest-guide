@@ -679,6 +679,71 @@
     巴哈马外海: seaPoint("巴哈马外海", -76.0, 24.5)
   };
 
+  const SEA_ROUTE_CORRIDORS = [
+    [
+      "泰晤士河口",
+      "北海南部",
+      "多佛海峡",
+      "怀特岛外海",
+      "英吉利海峡西口",
+      "韦桑岛外海",
+      "布列塔尼外海",
+      "比斯开湾北部",
+      "比斯开湾西南",
+      "加利西亚外海",
+      "奥波多外海",
+      "葡萄牙西岸外海",
+      "里斯本外海",
+      "圣文森特角外海",
+      "萨格雷斯外海",
+      "葡萄牙南岸外海",
+      "直布罗陀海峡西口",
+      "直布罗陀海峡中线",
+      "直布罗陀海峡东口",
+      "阿尔沃兰海",
+      "西班牙南岸外海",
+      "北非西岸航道",
+      "阿尔及尔外海"
+    ],
+    ["比斯开湾西南", "比斯开湾外海", "比斯开湾北部"],
+    ["多佛海峡", "加来外海"],
+    ["英吉利海峡西口", "康沃尔外海"],
+    [
+      "直布罗陀海峡东口",
+      "阿尔沃兰海",
+      "西地中海中线",
+      "撒丁岛南方海域",
+      "西西里海峡",
+      "爱奥尼亚海",
+      "克里特北方海域",
+      "尼罗河口外海",
+      "苏伊士湾",
+      "红海中部",
+      "曼德海峡",
+      "亚丁湾",
+      "阿曼外海",
+      "印度西岸航道",
+      "锡兰外海",
+      "孟加拉湾",
+      "马六甲海峡",
+      "南海西部",
+      "台湾海峡",
+      "日本西海道"
+    ],
+    [
+      "葡萄牙南岸外海",
+      "加那利外海",
+      "佛得角外海",
+      "几内亚湾外海",
+      "刚果外海",
+      "好望角外海",
+      "莫桑比克海峡",
+      "桑给巴尔外海",
+      "亚丁湾"
+    ],
+    ["里斯本外海", "亚速尔外海", "大西洋中部", "巴哈马外海"]
+  ];
+
   const templateFactories = {
     trade: buildTradePlan,
     adventure: buildAdventurePlan,
@@ -2199,10 +2264,15 @@
   }
 
   function asRoutePort(stop) {
+    const accessLabels = portOffshoreLabels(stop.coord);
+    const accessPoint = accessLabels.map((label) => SEA_WAYPOINTS[label]).find(Boolean);
     return {
-      ...stop.coord,
+      ...(accessPoint || stop.coord),
       label: stop.coord.label || stop.name,
       kind: "port",
+      actualLat: stop.coord.lat,
+      actualLon: stop.coord.lon,
+      routeAccessLabels: accessLabels,
       stopIndex: stop.index
     };
   }
@@ -2216,6 +2286,9 @@
   function buildSeaLegWaypoints(from, to) {
     const exactLabels = exactCoastalRouteLabels(from, to);
     if (exactLabels.length) return labelsToWaypoints(exactLabels);
+
+    const graphLabels = findSeaGraphRouteLabels(portOffshoreLabels(from), portOffshoreLabels(to));
+    if (graphLabels.length) return labelsToWaypoints(graphLabels);
 
     const rule = pickSeaRouteRule(from, to);
     const labels = [
@@ -2236,6 +2309,91 @@
       waypoints.push(point);
     });
     return waypoints;
+  }
+
+  function findSeaGraphRouteLabels(startLabels, endLabels) {
+    const starts = normalizeSeaLabels(startLabels);
+    const ends = normalizeSeaLabels(endLabels);
+    if (!starts.length || !ends.length) return [];
+
+    const graph = buildSeaRouteGraph();
+    let bestPath = [];
+    let bestDistance = Infinity;
+    starts.forEach((start) => {
+      ends.forEach((end) => {
+        const result = shortestSeaPath(graph, start, end);
+        if (result.path.length && result.distance < bestDistance) {
+          bestPath = result.path;
+          bestDistance = result.distance;
+        }
+      });
+    });
+    return bestPath;
+  }
+
+  function normalizeSeaLabels(labels) {
+    return ensureArray(labels).filter((label) => SEA_WAYPOINTS[label]);
+  }
+
+  function buildSeaRouteGraph() {
+    const graph = new Map();
+    const addEdge = (left, right) => {
+      const a = SEA_WAYPOINTS[left];
+      const b = SEA_WAYPOINTS[right];
+      if (!a || !b) return;
+      const distance = distanceNm(a, b);
+      if (!graph.has(left)) graph.set(left, []);
+      if (!graph.has(right)) graph.set(right, []);
+      graph.get(left).push({ label: right, distance });
+      graph.get(right).push({ label: left, distance });
+    };
+
+    SEA_ROUTE_CORRIDORS.forEach((corridor) => {
+      for (let index = 0; index < corridor.length - 1; index += 1) {
+        addEdge(corridor[index], corridor[index + 1]);
+      }
+    });
+    return graph;
+  }
+
+  function shortestSeaPath(graph, start, end) {
+    if (start === end) return { path: [start], distance: 0 };
+    const distances = new Map([[start, 0]]);
+    const previous = new Map();
+    const unvisited = new Set(graph.keys());
+
+    while (unvisited.size) {
+      let current = "";
+      let currentDistance = Infinity;
+      unvisited.forEach((label) => {
+        const distance = distances.get(label) ?? Infinity;
+        if (distance < currentDistance) {
+          current = label;
+          currentDistance = distance;
+        }
+      });
+      if (!current || currentDistance === Infinity) break;
+      if (current === end) break;
+      unvisited.delete(current);
+
+      (graph.get(current) || []).forEach((edge) => {
+        if (!unvisited.has(edge.label)) return;
+        const nextDistance = currentDistance + edge.distance;
+        if (nextDistance < (distances.get(edge.label) ?? Infinity)) {
+          distances.set(edge.label, nextDistance);
+          previous.set(edge.label, current);
+        }
+      });
+    }
+
+    if (!distances.has(end)) return { path: [], distance: Infinity };
+    const path = [end];
+    while (path[0] !== start) {
+      const prev = previous.get(path[0]);
+      if (!prev) return { path: [], distance: Infinity };
+      path.unshift(prev);
+    }
+    return { path, distance: distances.get(end) };
   }
 
   function exactCoastalRouteLabels(from, to) {
@@ -2329,24 +2487,80 @@
   }
 
   function portOffshoreLabels(port) {
+    if (Array.isArray(port.routeAccessLabels)) return port.routeAccessLabels;
     const byPort = {
       萨格雷斯: ["萨格雷斯外海"],
       里斯本: ["里斯本外海"],
       奥波多: ["奥波多外海"],
+      塞维利亚: ["葡萄牙南岸外海", "直布罗陀海峡西口"],
+      马拉加: ["西班牙南岸外海"],
+      巴塞罗那: ["西地中海中线"],
+      瓦伦西亚: ["西地中海中线"],
       伦敦: ["泰晤士河口"],
       普利茅斯: ["康沃尔外海"],
       朴茨茅斯: ["怀特岛外海"],
       加来: ["加来外海"],
-      阿尔及尔: ["阿尔及尔外海"]
+      阿尔及尔: ["阿尔及尔外海"],
+      亚历山大: ["尼罗河口外海"],
+      苏伊士: ["苏伊士湾"],
+      亚丁: ["亚丁湾"],
+      马斯喀特: ["阿曼外海"],
+      科钦: ["印度西岸航道"],
+      卡利卡特: ["印度西岸航道"],
+      马六甲: ["马六甲海峡"],
+      澳门: ["南海西部"],
+      长崎: ["日本西海道"],
+      堺: ["日本西海道"],
+      江户: ["日本西海道"],
+      哈瓦那: ["巴哈马外海"],
+      圣多明各: ["巴哈马外海"]
     };
     if (byPort[port.label]) return byPort[port.label];
 
     const region = port.region || "";
-    if (/葡萄牙/.test(region)) return ["葡萄牙西岸外海"];
-    if (/英格兰|法国北岸/.test(region)) return ["英吉利海峡西口"];
+    if (/葡萄牙北岸/.test(region)) return ["奥波多外海"];
+    if (/葡萄牙西岸/.test(region)) return ["里斯本外海"];
+    if (/葡萄牙南岸/.test(region)) return ["萨格雷斯外海", "葡萄牙南岸外海"];
+    if (/伊比利亚北岸/.test(region)) return ["比斯开湾西南"];
+    if (/伊比利亚南岸|直布罗陀/.test(region)) return ["直布罗陀海峡西口", "西班牙南岸外海"];
+    if (/伊比利亚东岸|巴利阿里/.test(region)) return ["西地中海中线"];
+    if (/法国西岸/.test(region)) return ["比斯开湾北部"];
+    if (/法国北岸|英格兰南岸/.test(region)) return ["多佛海峡"];
+    if (/英格兰西南/.test(region)) return ["康沃尔外海"];
+    if (/英格兰|苏格兰|爱尔兰|低地国家|北德意志|北欧|波罗的海/.test(region)) return ["北海南部"];
+    if (/法国南岸|意大利|撒丁|科西嘉|西西里|希腊|亚得里亚|黑海|塞浦路斯|黎凡特/.test(region)) {
+      return port.lon <= 16 ? ["西地中海中线"] : ["克里特北方海域"];
+    }
+    if (/埃及/.test(region)) return ["尼罗河口外海"];
+    if (/红海/.test(region)) return ["红海中部"];
+    if (/北非西岸|加那利/.test(region)) return ["加那利外海"];
     if (/北非/.test(region)) return ["北非西岸航道"];
-    if (/印度/.test(region)) return ["印度西岸航道"];
+    if (/非洲西岸|黄金海岸|几内亚湾/.test(region)) return ["几内亚湾外海"];
+    if (/西非南岸|纳米比亚/.test(region)) return ["刚果外海"];
+    if (/非洲南端/.test(region)) return ["好望角外海"];
+    if (/非洲东南岸|非洲东岸|马达加斯加/.test(region)) return ["莫桑比克海峡"];
     if (/东非/.test(region)) return ["桑给巴尔外海"];
+    if (/阿拉伯海|阿曼湾|波斯湾/.test(region)) return ["阿曼外海"];
+    if (/印度西岸|印度洋/.test(region)) return ["印度西岸航道"];
+    if (/印度东岸|锡兰|孟加拉/.test(region)) return ["锡兰外海", "孟加拉湾"];
+    if (/缅甸|暹罗|马六甲|苏门答腊|爪哇|婆罗洲|苏拉威西|摩鹿加|帝汶|吕宋|东南亚/.test(region)) {
+      return ["马六甲海峡", "南海西部"];
+    }
+    if (/华南|华东|台湾|朝鲜|日本/.test(region)) return ["台湾海峡", "日本西海道"];
+    if (/加勒比|中美|北美东岸/.test(region)) return ["巴哈马外海"];
+    if (/大西洋/.test(region)) return ["亚速尔外海"];
+
+    if (isNorthSeaOrChannel(port)) return ["北海南部"];
+    if (isWesternMediterranean(port)) return ["西地中海中线"];
+    if (isEasternMediterranean(port)) return ["克里特北方海域"];
+    if (isAtlanticEurope(port)) return ["比斯开湾外海"];
+    if (isCaribbean(port)) return ["巴哈马外海"];
+    if (isEastAsia(port)) return ["日本西海道"];
+    if (isSouthEastAsia(port)) return ["马六甲海峡"];
+    if (isIndia(port)) return ["印度西岸航道"];
+    if (isArabia(port)) return ["阿曼外海"];
+    if (isEastAfrica(port)) return ["桑给巴尔外海"];
+    if (isWestAfrica(port)) return ["几内亚湾外海"];
     return [];
   }
 
