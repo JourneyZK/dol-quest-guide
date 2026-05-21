@@ -811,6 +811,11 @@
     calibrationStatus: document.querySelector("#calibration-status"),
     calibrationClear: document.querySelector("#calibration-clear"),
     calibrationRecords: document.querySelector("#calibration-records"),
+    navigationForm: document.querySelector("#navigation-form"),
+    navigationFrom: document.querySelector("#navigation-from"),
+    navigationTo: document.querySelector("#navigation-to"),
+    navigationPortList: document.querySelector("#navigation-port-list"),
+    navigationResults: document.querySelector("#navigation-results"),
     marketForm: document.querySelector("#market-form"),
     marketQuery: document.querySelector("#market-query"),
     marketResults: document.querySelector("#market-results"),
@@ -849,7 +854,9 @@
     });
     bindPositionControls();
     populateCalibrationPortList();
+    populateNavigationPortList();
     updateCalibrationStatus();
+    bindNavigationControls();
     bindMarketControls();
     startPositionPolling();
     initializeCalibrationSync();
@@ -993,6 +1000,57 @@
         showToast(error.message || "交易查询失败。");
       }
     });
+  }
+
+  function bindNavigationControls() {
+    els.navigationForm?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const fromQuery = els.navigationFrom?.value.trim() || "";
+      const toQuery = els.navigationTo?.value.trim() || "";
+      if (!fromQuery || !toQuery) {
+        showToast("请输入出发港和目的港。");
+        return;
+      }
+
+      const from = resolveNavigationPort(fromQuery);
+      const to = resolveNavigationPort(toQuery);
+      if (!from) {
+        showToast("没有找到出发港，请换中文名或日文名。");
+        els.navigationFrom?.focus();
+        return;
+      }
+      if (!to) {
+        showToast("没有找到目的港，请换中文名或日文名。");
+        els.navigationTo?.focus();
+        return;
+      }
+      if (geoKey(from.coord) === geoKey(to.coord)) {
+        showToast("出发港和目的港不能相同。");
+        return;
+      }
+
+      const plan = buildNavigationPlan(from, to);
+      renderPlan(plan, {
+        status: `港口导航：${from.label} → ${to.label}`,
+        source: "navigation"
+      });
+      renderNavigationResult(from, to, buildRouteContext(plan));
+      showToast("已生成港口导航路线。");
+    });
+  }
+
+  function renderNavigationResult(from, to, routeContext) {
+    if (!els.navigationResults) return;
+    const routePlan = routeContext?.routePlan;
+    const waypointCount = routePlan?.points?.length || 2;
+    const seaGuide = routePlan?.hasWaypoints ? buildSeaRouteItinerary(routePlan) : "";
+    els.navigationResults.innerHTML = `
+      <div class="navigation-summary">
+        <strong>${escapeHtml(from.label)} → ${escapeHtml(to.label)}</strong>
+        <span>${waypointCount} 个航路点</span>
+      </div>
+      ${seaGuide || "<p>两个港口距离较近，可按地图直航。</p>"}
+    `;
   }
 
   function renderMarketLoading(mode, query) {
@@ -1170,6 +1228,72 @@
     els.calibrationPortList.innerHTML = names
       .map((name) => `<option value="${escapeHtml(name)}"></option>`)
       .join("");
+  }
+
+  function populateNavigationPortList() {
+    if (!els.navigationPortList) return;
+    const names = uniquePorts()
+      .map(({ key, coord }) => coord.label || key)
+      .filter(Boolean)
+      .sort((left, right) => left.localeCompare(right, "zh-CN"));
+    els.navigationPortList.innerHTML = names
+      .map((name) => `<option value="${escapeHtml(name)}"></option>`)
+      .join("");
+  }
+
+  function resolveNavigationPort(query) {
+    const target = resolveCalibrationPort(query);
+    if (!target) return null;
+    return {
+      label: target.label,
+      coord: target.coord
+    };
+  }
+
+  function buildNavigationPlan(from, to) {
+    const routePlan = buildSailingRoutePlan([
+      { name: from.label, index: 0, coord: from.coord },
+      { name: to.label, index: 1, coord: to.coord }
+    ]);
+    const routeGuide = routePlan?.hasWaypoints ? buildNavigationSailingGuidance(routePlan) : "";
+    const directGuide = routeGuide || `从${from.label}出航后，按地图航线前往${to.label}。`;
+    return {
+      id: `navigation-${normalize(from.label)}-${normalize(to.label)}-${Date.now()}`,
+      type: "generic",
+      version: "港口导航",
+      title: `${from.label} 到 ${to.label}`,
+      aliases: [],
+      start: from.label,
+      destination: to.label,
+      npc: "无",
+      estimatedTime: routePlan?.hasWaypoints ? "按航路点分段航行" : "短程航行",
+      difficulty: "按海域情况调整",
+      reward: "无",
+      requirements: [],
+      prep: ["补足水粮", "确认目的港是否已发现", "长距离航行建议带停战书和备用帆"],
+      steps: [
+        `在${from.label}出航前补给水粮，并检查船帆耐久。`,
+        directGuide,
+        `抵达${to.label}附近后沿海岸线确认港口光点，靠港完成导航。`
+      ],
+      notes: [
+        "红色实线为推荐主航路，红色虚线表示从海上航路点接近港口。",
+        "如果目的港尚未发现，抵达最后一个航路点后沿海岸线低速搜索。",
+        "实时船位开启后会叠加在同一张地图上。"
+      ],
+      tags: ["导航", "港口", "航线"]
+    };
+  }
+
+  function buildNavigationSailingGuidance(routePlan) {
+    const legTexts = routePlan.legs
+      .filter((leg) => leg.waypoints.length)
+      .map((leg) => {
+        const waypoints = leg.waypoints.map((point) => point.label).join("、");
+        return `${leg.from.label}到${leg.to.label}：先经${waypoints}`;
+      });
+    if (!legTexts.length) return "";
+    return `推荐航行路线：${legTexts.join("；")}。如果目的港尚未发现，抵达最后一个航路参照点后沿海岸线低速搜索港口光点。`;
   }
 
   function addCalibrationFromCurrentPosition() {

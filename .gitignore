@@ -1,5 +1,6 @@
 # Local runtime files
 data/market-cache.json
+data/map-calibrations.json
 data/ocr-*
 data/position-gamecoord-preview.png
 data/route-map-*.png

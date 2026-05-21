@@ -9,7 +9,7 @@
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
     <script src="./data/quests.js" defer></script>
-    <script src="./app.js?v=20260521-ocr-calibration-assist" defer></script>
+    <script src="./app.js?v=20260522-port-navigation" defer></script>
   </head>
   <body>
     <div class="shell">
@@ -156,6 +156,27 @@
           </article>
 
           <aside class="detail-stack" aria-label="任务细节">
+            <section class="detail-block navigation-block">
+              <h3>港口导航</h3>
+              <form class="navigation-form" id="navigation-form">
+                <label>
+                  出发港
+                  <input id="navigation-from" list="navigation-port-list" type="search" placeholder="伦敦 / ロンドン" />
+                </label>
+                <label>
+                  目的港
+                  <input id="navigation-to" list="navigation-port-list" type="search" placeholder="哥本哈根 / コペンハーゲン" />
+                </label>
+                <datalist id="navigation-port-list"></datalist>
+                <button class="secondary-action" type="submit">
+                  <i data-lucide="navigation" aria-hidden="true"></i>
+                  生成导航
+                </button>
+              </form>
+              <div class="navigation-results" id="navigation-results">
+                <p>选择两个港口后，会生成推荐航线和航路点。</p>
+              </div>
+            </section>
             <section class="detail-block market-block">
               <h3>交易查询</h3>
               <form class="market-form" id="market-form">
