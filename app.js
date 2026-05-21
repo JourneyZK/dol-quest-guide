@@ -1,9 +1,6 @@
 (function () {
   const STORAGE_KEY = "uw-quest-guide-library";
   const CALIBRATION_STORAGE_KEY = "uw-quest-guide-map-calibrations";
-  const OCR_CALIBRATION_SNAP_RADIUS = 40;
-  const OCR_CALIBRATION_SOFT_RADIUS = 220;
-  const OCR_CALIBRATION_DIGIT_RADIUS = 320;
   const TYPE_LABELS = {
     all: "全部",
     trade: "交易",
@@ -1591,10 +1588,7 @@
     const hasLatLon = isValidLatLon(rawLat, rawLon);
     const hasGameCoord = isValidGameCoord(rawGameX, rawGameY);
     const source = String(position.source || (hasGameCoord ? "game" : "manual")).slice(0, 40);
-    const gameCorrection = hasGameCoord ? correctGameCoordWithCalibration(rawGameX, rawGameY, source) : null;
-    const positionGameX = gameCorrection?.gameX ?? rawGameX;
-    const positionGameY = gameCorrection?.gameY ?? rawGameY;
-    const converted = hasLatLon ? null : hasGameCoord ? convertGameCoordToLatLon(positionGameX, positionGameY) : null;
+    const converted = hasLatLon ? null : hasGameCoord ? convertGameCoordToLatLon(rawGameX, rawGameY) : null;
     if (!hasLatLon && !converted) return null;
 
     return {
@@ -1602,14 +1596,13 @@
       lon: hasLatLon ? rawLon : converted.lon,
       ...(hasGameCoord
         ? {
-            gameX: normalizeGameX(positionGameX),
-            gameY: Math.round(positionGameY)
+            gameX: normalizeGameX(rawGameX),
+            gameY: Math.round(rawGameY)
           }
         : {}),
       label: String(position.label || "当前船位").slice(0, 40),
       source,
       updatedAt: position.updatedAt || new Date().toISOString(),
-      ...(gameCorrection?.applied ? { gameCorrection } : {}),
       conversion: converted
         ? {
             anchors: converted.anchors,
@@ -1647,126 +1640,13 @@
     if (calibrationNames.length) {
       const influence = Number(position.conversion?.calibrationInfluence);
       const suffix = Number.isFinite(influence) ? ` ${Math.round(influence * 100)}%` : "";
-      parts.push(`使用${calibrationNames[0].replace("校准:", "")}校准${suffix}`);
-    }
-    if (position.gameCorrection?.applied) {
-      const correction = position.gameCorrection;
-      const distance = Number(correction.distance);
-      const suffix = Number.isFinite(distance) ? `，原偏差约 ${Math.round(distance)} 格` : "";
-      parts.push(`OCR已按${correction.anchorLabel || "校准港口"}修正${suffix}`);
+      parts.push(`船位已按${calibrationNames[0].replace("校准:", "")}校准${suffix}`);
     }
     return parts.join(" | ");
   }
 
   function isValidGameCoord(gameX, gameY) {
     return Number.isFinite(gameX) && Number.isFinite(gameY) && gameX >= 0 && gameX <= GAME_COORD_WRAP && gameY >= 0 && gameY <= GAME_COORD_MAX_Y;
-  }
-
-  function correctGameCoordWithCalibration(gameX, gameY, source = "") {
-    const rawX = normalizeGameX(gameX);
-    const rawY = Math.round(gameY);
-    if (!shouldCorrectGameCoordFromCalibration(source)) {
-      return { gameX: rawX, gameY: rawY, applied: false };
-    }
-
-    const calibrations = state.calibrationAnchors || [];
-    if (!calibrations.length) return { gameX: rawX, gameY: rawY, applied: false };
-
-    const nearby = calibrations
-      .map((anchor) => {
-        const unwrappedX = unwrapGameX(anchor.gameX, rawX);
-        const dx = unwrappedX - rawX;
-        const dy = anchor.gameY - rawY;
-        return {
-          anchor,
-          dx,
-          dy,
-          distance: Math.hypot(dx, dy),
-          digitErrors: countGameCoordDigitErrors(rawX, rawY, anchor.gameX, anchor.gameY)
-        };
-      })
-      .sort((left, right) => left.distance - right.distance);
-
-    const exact = nearby[0];
-    if (!exact) return { gameX: rawX, gameY: rawY, applied: false };
-    if (isCloserToBaseGameAnchor(rawX, rawY, exact.distance)) {
-      return { gameX: rawX, gameY: rawY, applied: false };
-    }
-
-    const digitMatch = nearby
-      .filter((item) => item.digitErrors <= 1 && item.distance <= OCR_CALIBRATION_DIGIT_RADIUS)
-      .sort((left, right) => left.digitErrors - right.digitErrors || left.distance - right.distance)[0];
-    const snapTarget =
-      exact.distance <= OCR_CALIBRATION_SNAP_RADIUS
-        ? exact
-        : digitMatch && digitMatch.distance > OCR_CALIBRATION_SNAP_RADIUS
-          ? digitMatch
-          : null;
-
-    if (snapTarget) {
-      return buildGameCoordCorrection(rawX, rawY, snapTarget, 1, snapTarget === digitMatch ? "digit" : "nearby");
-    }
-
-    if (exact.distance > OCR_CALIBRATION_SOFT_RADIUS || exact.digitErrors > 2) {
-      return { gameX: rawX, gameY: rawY, applied: false };
-    }
-
-    const influence = Math.pow(
-      1 - (exact.distance - OCR_CALIBRATION_SNAP_RADIUS) / (OCR_CALIBRATION_SOFT_RADIUS - OCR_CALIBRATION_SNAP_RADIUS),
-      2
-    );
-    return buildGameCoordCorrection(rawX, rawY, exact, clampNumber(influence, 0, 1), "nearby");
-  }
-
-  function shouldCorrectGameCoordFromCalibration(source) {
-    const text = String(source || "").toLowerCase();
-    if (text.includes("manual")) return false;
-    return !text || text.includes("ocr") || text === "game" || text === "calibrated";
-  }
-
-  function isCloserToBaseGameAnchor(rawX, rawY, calibrationDistance) {
-    const nearest = GAME_COORD_ANCHORS.map((anchor) => {
-      const unwrappedX = unwrapGameX(anchor.gameX, rawX);
-      return Math.hypot(unwrappedX - rawX, anchor.gameY - rawY);
-    }).sort((left, right) => left - right)[0];
-    return (
-      Number.isFinite(nearest) &&
-      nearest <= OCR_CALIBRATION_SNAP_RADIUS &&
-      nearest + OCR_CALIBRATION_SNAP_RADIUS < calibrationDistance
-    );
-  }
-
-  function buildGameCoordCorrection(rawX, rawY, target, influence, method) {
-    if (!target || influence <= 0) return { gameX: rawX, gameY: rawY, applied: false };
-    const correctedX = normalizeGameX(rawX + target.dx * influence);
-    const correctedY = clampNumber(Math.round(rawY + target.dy * influence), 0, GAME_COORD_MAX_Y);
-    const adjustment = Math.hypot(target.dx * influence, target.dy * influence);
-    if (adjustment < 0.5) return { gameX: rawX, gameY: rawY, applied: false };
-    return {
-      gameX: Math.round(correctedX),
-      gameY: correctedY,
-      applied: true,
-      anchorLabel: target.anchor.label,
-      distance: target.distance,
-      influence,
-      method,
-      rawGameX: rawX,
-      rawGameY: rawY
-    };
-  }
-
-  function countGameCoordDigitErrors(leftX, leftY, rightX, rightY) {
-    const left = formatGameCoordForOcrCompare(leftX, leftY);
-    const right = formatGameCoordForOcrCompare(rightX, rightY);
-    let errors = 0;
-    for (let index = 0; index < left.length; index += 1) {
-      if (left[index] !== right[index]) errors += 1;
-    }
-    return errors;
-  }
-
-  function formatGameCoordForOcrCompare(gameX, gameY) {
-    return `${String(Math.round(normalizeGameX(gameX))).padStart(5, "0")},${String(Math.round(gameY)).padStart(4, "0")}`;
   }
 
   function convertGameCoordToLatLon(gameX, gameY) {
