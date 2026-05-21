@@ -1,5 +1,6 @@
 (function () {
   const STORAGE_KEY = "uw-quest-guide-library";
+  const CALIBRATION_STORAGE_KEY = "uw-quest-guide-map-calibrations";
   const TYPE_LABELS = {
     all: "全部",
     trade: "交易",
@@ -706,6 +707,11 @@
     positionLon: document.querySelector("#position-lon"),
     positionStatus: document.querySelector("#position-status"),
     positionClear: document.querySelector("#position-clear"),
+    calibrationForm: document.querySelector("#calibration-form"),
+    calibrationPort: document.querySelector("#calibration-port"),
+    calibrationPortList: document.querySelector("#calibration-port-list"),
+    calibrationStatus: document.querySelector("#calibration-status"),
+    calibrationClear: document.querySelector("#calibration-clear"),
     marketForm: document.querySelector("#market-form"),
     marketQuery: document.querySelector("#market-query"),
     marketResults: document.querySelector("#market-results"),
@@ -726,6 +732,7 @@
     activeQuestId: null,
     currentPlan: null,
     currentPosition: null,
+    calibrationAnchors: loadCalibrationAnchors(),
     leafletMap: null,
     shipMarker: null,
     positionPollTimer: null,
@@ -742,6 +749,8 @@
       confidence: 0
     });
     bindPositionControls();
+    populateCalibrationPortList();
+    updateCalibrationStatus();
     bindMarketControls();
     startPositionPolling();
 
@@ -813,6 +822,39 @@
       if (canUseLocalApi()) {
         await fetch("/api/position", { method: "DELETE" }).catch(() => {});
       }
+    });
+
+    els.calibrationForm?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const result = addCalibrationFromCurrentPosition();
+      if (!result.ok) {
+        showToast(result.message);
+        return;
+      }
+      showToast(`已添加校准点：${result.label}`);
+      if (state.currentPosition?.gameX !== undefined && state.currentPosition?.gameY !== undefined) {
+        await updatePosition({
+          gameX: state.currentPosition.gameX,
+          gameY: state.currentPosition.gameY,
+          label: "当前船位",
+          source: "calibrated"
+        });
+      }
+    });
+
+    els.calibrationClear?.addEventListener("click", async () => {
+      state.calibrationAnchors = [];
+      saveCalibrationAnchors();
+      updateCalibrationStatus();
+      if (state.currentPosition?.gameX !== undefined && state.currentPosition?.gameY !== undefined) {
+        await updatePosition({
+          gameX: state.currentPosition.gameX,
+          gameY: state.currentPosition.gameY,
+          label: "当前船位",
+          source: "game"
+        });
+      }
+      showToast("地图校准已清空。");
     });
   }
 
@@ -1005,6 +1047,107 @@
       label: "当前船位",
       source: "manual"
     };
+  }
+
+  function populateCalibrationPortList() {
+    if (!els.calibrationPortList) return;
+    const names = uniquePorts()
+      .map(({ key, coord }) => coord.label || key)
+      .filter(Boolean)
+      .sort((left, right) => left.localeCompare(right, "zh-CN"));
+    els.calibrationPortList.innerHTML = names
+      .map((name) => `<option value="${escapeHtml(name)}"></option>`)
+      .join("");
+  }
+
+  function addCalibrationFromCurrentPosition() {
+    if (!state.currentPosition || !Number.isFinite(state.currentPosition.gameX) || !Number.isFinite(state.currentPosition.gameY)) {
+      return { ok: false, message: "先用 OCR 或游戏 X/Y 显示一次当前船位。" };
+    }
+
+    const query = els.calibrationPort?.value.trim() || "";
+    if (!query) return { ok: false, message: "请输入当前所在港口名。" };
+
+    const target = resolveCalibrationPort(query);
+    if (!target) return { ok: false, message: "没有找到这个港口，请换中文名或日文名。" };
+
+    const anchor = normalizeCalibrationAnchor({
+      id: normalize(target.label),
+      label: target.label,
+      gameX: state.currentPosition.gameX,
+      gameY: state.currentPosition.gameY,
+      lon: target.coord.lon,
+      lat: target.coord.lat,
+      createdAt: new Date().toISOString()
+    });
+    if (!anchor) return { ok: false, message: "当前船位或港口坐标无效。" };
+
+    state.calibrationAnchors = [
+      anchor,
+      ...state.calibrationAnchors.filter((item) => normalize(item.label) !== normalize(anchor.label))
+    ].slice(0, 40);
+    saveCalibrationAnchors();
+    updateCalibrationStatus();
+    return { ok: true, label: anchor.label };
+  }
+
+  function resolveCalibrationPort(query) {
+    const direct = getPortCoord(query);
+    if (direct) return { label: direct.label || query, coord: direct };
+    const normalizedQuery = normalize(query);
+    const entry = Object.entries(PORT_COORDS).find(([key, coord]) => {
+      const label = coord.label || key;
+      return normalize(key) === normalizedQuery || normalize(label) === normalizedQuery;
+    });
+    if (!entry) return null;
+    const [key, coord] = entry;
+    return { label: coord.label || key, coord };
+  }
+
+  function loadCalibrationAnchors() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CALIBRATION_STORAGE_KEY));
+      if (!Array.isArray(saved)) return [];
+      return saved.map(normalizeCalibrationAnchor).filter(Boolean).slice(0, 40);
+    } catch (error) {
+      console.warn("Failed to load map calibrations", error);
+      return [];
+    }
+  }
+
+  function saveCalibrationAnchors() {
+    localStorage.setItem(CALIBRATION_STORAGE_KEY, JSON.stringify(state.calibrationAnchors));
+  }
+
+  function normalizeCalibrationAnchor(anchor) {
+    if (!anchor) return null;
+    const gameX = Number(anchor.gameX);
+    const gameY = Number(anchor.gameY);
+    const lon = Number(anchor.lon);
+    const lat = Number(anchor.lat);
+    if (!isValidGameCoord(gameX, gameY) || !isValidLatLon(lat, lon)) return null;
+    const label = String(anchor.label || "校准点").slice(0, 40);
+    return {
+      id: String(anchor.id || normalize(label) || `${Math.round(gameX)}-${Math.round(gameY)}`).slice(0, 80),
+      label,
+      gameX: normalizeGameX(gameX),
+      gameY: Math.round(gameY),
+      lon: normalizeLon(lon),
+      lat,
+      source: "calibration",
+      createdAt: anchor.createdAt || new Date().toISOString()
+    };
+  }
+
+  function updateCalibrationStatus() {
+    if (!els.calibrationStatus) return;
+    const count = state.calibrationAnchors.length;
+    if (!count) {
+      els.calibrationStatus.textContent = "未添加校准点";
+      return;
+    }
+    const labels = state.calibrationAnchors.slice(0, 3).map((anchor) => anchor.label).join("、");
+    els.calibrationStatus.textContent = `已校准 ${count} 点：${labels}${count > 3 ? "…" : ""}`;
   }
 
   function loadQuests() {
@@ -1334,6 +1477,10 @@
     if (Number.isFinite(position.lat) && Number.isFinite(position.lon)) {
       parts.push(`地图约 ${position.lat.toFixed(4)}, ${position.lon.toFixed(4)}`);
     }
+    const calibrationNames = position.conversion?.anchors?.filter((name) => String(name).startsWith("校准:")) || [];
+    if (calibrationNames.length) {
+      parts.push(`使用${calibrationNames[0].replace("校准:", "")}校准`);
+    }
     return parts.join(" | ");
   }
 
@@ -1342,9 +1489,14 @@
   }
 
   function convertGameCoordToLatLon(gameX, gameY) {
+    const base = convertGameCoordWithAnchors(gameX, gameY, GAME_COORD_ANCHORS);
+    return applyCalibrationOffsets(gameX, gameY, base) || base;
+  }
+
+  function convertGameCoordWithAnchors(gameX, gameY, anchors) {
     const x = normalizeGameX(gameX);
     const y = Number(gameY);
-    const nearestAnchors = GAME_COORD_ANCHORS.map((anchor) => {
+    const nearestAnchors = anchors.map((anchor) => {
       const unwrappedX = unwrapGameX(anchor.gameX, x);
       const dx = unwrappedX - x;
       const dy = anchor.gameY - y;
@@ -1374,6 +1526,56 @@
       lon: normalizeLon(Number.isFinite(lon) ? lon : fallback.lon),
       confidence: Math.max(0.25, Math.min(0.95, 1 - (nearestAnchors[0]?.distance || 0) / 900)),
       anchors: nearestAnchors.slice(0, 3).map((item) => item.anchor.label)
+    };
+  }
+
+  function applyCalibrationOffsets(gameX, gameY, basePosition) {
+    const calibrations = state.calibrationAnchors || [];
+    if (!basePosition || !calibrations.length) return null;
+
+    const x = normalizeGameX(gameX);
+    const y = Number(gameY);
+    const nearby = calibrations
+      .map((anchor) => {
+        const unwrappedX = unwrapGameX(anchor.gameX, x);
+        const distance = Math.hypot(unwrappedX - x, anchor.gameY - y);
+        return { anchor, distance };
+      })
+      .sort((left, right) => left.distance - right.distance)
+      .slice(0, 6);
+
+    if (!nearby.length || nearby[0].distance > 2600) return null;
+    if (nearby[0].distance <= 0.5) {
+      return {
+        lat: nearby[0].anchor.lat,
+        lon: nearby[0].anchor.lon,
+        confidence: 1,
+        anchors: [`校准:${nearby[0].anchor.label}`]
+      };
+    }
+
+    let totalWeight = 0;
+    let latOffset = 0;
+    let lonOffset = 0;
+    nearby.forEach(({ anchor, distance }) => {
+      const baseAtAnchor = convertGameCoordWithAnchors(anchor.gameX, anchor.gameY, GAME_COORD_ANCHORS);
+      if (!baseAtAnchor) return;
+      const weight = 1 / Math.max(1, Math.pow(distance, 1.15));
+      totalWeight += weight;
+      latOffset += (anchor.lat - baseAtAnchor.lat) * weight;
+      lonOffset += normalizeLonDelta(anchor.lon - baseAtAnchor.lon) * weight;
+    });
+    if (!totalWeight) return null;
+
+    const nearestDistance = nearby[0].distance;
+    return {
+      lat: clampNumber(basePosition.lat + latOffset / totalWeight, -85, 85),
+      lon: normalizeLon(basePosition.lon + lonOffset / totalWeight),
+      confidence: Math.max(basePosition.confidence || 0.25, Math.max(0.35, 1 - nearestDistance / 1800)),
+      anchors: [
+        ...nearby.slice(0, 3).map((item) => `校准:${item.anchor.label}`),
+        ...(basePosition.anchors || []).slice(0, 2)
+      ]
     };
   }
 
@@ -1456,6 +1658,13 @@
 
   function normalizeLon(lon) {
     let value = Number(lon);
+    while (value > 180) value -= 360;
+    while (value < -180) value += 360;
+    return value;
+  }
+
+  function normalizeLonDelta(delta) {
+    let value = Number(delta);
     while (value > 180) value -= 360;
     while (value < -180) value += 360;
     return value;

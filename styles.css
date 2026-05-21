@@ -884,6 +884,72 @@ textarea:focus {
   background: #e7f5f2;
 }
 
+.calibration-panel {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 320px) auto auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 8px;
+  border: 1px solid rgba(94, 79, 47, 0.18);
+  border-radius: var(--radius);
+  padding: 10px;
+  background: #fff9ec;
+}
+
+.calibration-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.calibration-copy strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.calibration-copy span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.calibration-panel label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.calibration-panel input {
+  width: 100%;
+  border: 1px solid rgba(94, 79, 47, 0.2);
+  border-radius: 6px;
+  padding: 8px 9px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.calibration-panel button {
+  min-height: 36px;
+  border: 1px solid rgba(121, 87, 27, 0.28);
+  border-radius: 6px;
+  padding: 0 12px;
+  background: #fff3d8;
+  color: #7a5313;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.calibration-panel button:hover {
+  background: #ffe8b5;
+}
+
 .ship-position-marker {
   display: flex;
   align-items: center;
@@ -1270,7 +1336,15 @@ textarea:focus {
     grid-template-columns: 1fr 1fr;
   }
 
+  .calibration-panel {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .position-copy {
+    grid-column: 1 / -1;
+  }
+
+  .calibration-copy {
     grid-column: 1 / -1;
   }
 }
@@ -1312,6 +1386,10 @@ textarea:focus {
   }
 
   .position-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .calibration-panel {
     grid-template-columns: 1fr;
   }
 }

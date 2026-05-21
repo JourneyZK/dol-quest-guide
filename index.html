@@ -9,7 +9,7 @@
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
     <script src="./data/quests.js" defer></script>
-    <script src="./app.js?v=20260505-market" defer></script>
+    <script src="./app.js?v=20260521-calibration" defer></script>
   </head>
   <body>
     <div class="shell">
@@ -136,6 +136,19 @@
                 </label>
                 <button type="submit">显示船位</button>
                 <button id="position-clear" type="button">清除</button>
+              </form>
+              <form class="calibration-panel" id="calibration-form">
+                <div class="calibration-copy">
+                  <strong>地图校准</strong>
+                  <span id="calibration-status">未添加校准点</span>
+                </div>
+                <label>
+                  所在港口
+                  <input id="calibration-port" list="calibration-port-list" type="search" placeholder="伦敦 / ロンドン" />
+                  <datalist id="calibration-port-list"></datalist>
+                </label>
+                <button type="submit">添加校准</button>
+                <button id="calibration-clear" type="button">清空校准</button>
               </form>
             </section>
             <ol class="steps" id="steps"></ol>
