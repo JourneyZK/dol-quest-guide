@@ -7,11 +7,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "$current=$PID; Get-CimIn
 
 echo.
 echo Choose OCR region:
-echo   1. Drag a new coordinate area
-echo   2. Reuse the saved area
+echo   1. Drag a new coordinate area (low load)
+echo   2. Reuse the saved area (low load)
+echo   3. Reuse the saved area (high accuracy, may lag)
 echo.
-choice /C 12 /N /M "Press 1 or 2: "
-if errorlevel 2 (
+choice /C 123 /N /M "Press 1, 2, or 3: "
+if errorlevel 3 (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\live-position-ocr.ps1" -HighAccuracy
+) else if errorlevel 2 (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\live-position-ocr.ps1"
 ) else (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\live-position-ocr.ps1" -ResetRegion

@@ -1,15 +1,18 @@
 param(
-  [int]$IntervalSeconds = 2,
+  [int]$IntervalSeconds = 3,
   [string]$ImagePath = "",
   [switch]$Once,
   [switch]$ResetRegion,
   [switch]$NoPost,
   [switch]$NoStable,
+  [switch]$HighAccuracy,
   [switch]$UseTemplates,
   [switch]$NoTemplates,
   [string]$TrainText = "",
   [switch]$ResetTemplates,
   [switch]$ClearTemplatesOnly,
+  [int]$FullScanEvery = 5,
+  [int]$TesseractTimeoutSeconds = 3,
   [int]$X = -1,
   [int]$Y = -1,
   [int]$Width = 0,
@@ -29,10 +32,13 @@ $ServerUrl = "http://127.0.0.1:8765"
 $MinRegionWidth = 80
 $MinRegionHeight = 18
 $MaxCandidateAgeSeconds = 120
+$TesseractTimeoutMilliseconds = [Math]::Max(1, $TesseractTimeoutSeconds) * 1000
+$FullScanEvery = [Math]::Max(1, $FullScanEvery)
 $script:LastCoordinate = $null
 $script:LastSentCoordinate = $null
 $script:LastCandidateCoordinate = $null
 $script:LastCandidateAt = $null
+$script:FastMissCount = 0
 $script:PendingCoordinate = $null
 $script:PendingCount = 0
 $script:RejectedJumpCount = 0
@@ -943,6 +949,8 @@ function Convert-ToOcrImage($InputPath, $OutputPath, $Region, $Mode = "color", $
       $output = New-Object System.Drawing.Bitmap -ArgumentList ($work.Width * $Scale), ($work.Height * $Scale)
       try {
         if ($Mode -eq "binary") {
+          $binary = New-Object System.Drawing.Bitmap -ArgumentList $work.Width, $work.Height
+          try {
           for ($py = 0; $py -lt $work.Height; $py++) {
             for ($px = 0; $px -lt $work.Width; $px++) {
               $pixel = $work.GetPixel($px, $py)
@@ -951,12 +959,19 @@ function Convert-ToOcrImage($InputPath, $OutputPath, $Region, $Mode = "color", $
               $minChannel = [Math]::Min($pixel.R, [Math]::Min($pixel.G, $pixel.B))
               $isText = $brightness -ge $Threshold -and ($maxChannel - $minChannel) -lt 75
               $color = if ($isText) { [System.Drawing.Color]::Black } else { [System.Drawing.Color]::White }
-              for ($dy = 0; $dy -lt $Scale; $dy++) {
-                for ($dx = 0; $dx -lt $Scale; $dx++) {
-                  $output.SetPixel(($px * $Scale) + $dx, ($py * $Scale) + $dy, $color)
-                }
-              }
+              $binary.SetPixel($px, $py, $color)
             }
+          }
+            $graphics = [System.Drawing.Graphics]::FromImage($output)
+            try {
+              $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::NearestNeighbor
+              $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::Half
+              $graphics.DrawImage($binary, 0, 0, $output.Width, $output.Height)
+            } finally {
+              $graphics.Dispose()
+            }
+          } finally {
+            $binary.Dispose()
           }
         } else {
           $graphics = [System.Drawing.Graphics]::FromImage($output)
@@ -1099,18 +1114,55 @@ function Select-BestCoordinate($Candidates) {
   }
 }
 
+function ConvertTo-ProcessArgument([string]$Value) {
+  if ($null -eq $Value) { return '""' }
+  return '"' + ($Value -replace '"', '\"') + '"'
+}
+
 function Invoke-TesseractText($TesseractPath, $ImagePath, [int]$PageSegMode, [bool]$Whitelist) {
   $args = @($ImagePath, "stdout", "--psm", [string]$PageSegMode)
   if ($Whitelist) {
     $args += @("-c", "tessedit_char_whitelist=0123456789,")
   }
+  $process = $null
   try {
-    $text = & $TesseractPath @args 2>$null
-    if ($LASTEXITCODE -ne 0) { return "" }
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $TesseractPath
+    $startInfo.Arguments = (($args | ForEach-Object { ConvertTo-ProcessArgument ([string]$_) }) -join " ")
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.CreateNoWindow = $true
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+    if (-not $process.Start()) { return "" }
+    try { $process.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal } catch {}
+
+    if (-not $process.WaitForExit($TesseractTimeoutMilliseconds)) {
+      try { $process.Kill() } catch {}
+      return ""
+    }
+
+    $text = $process.StandardOutput.ReadToEnd()
+    $process.StandardError.ReadToEnd() | Out-Null
+    if ($process.ExitCode -ne 0) { return "" }
     return $text
   } catch {
     return ""
+  } finally {
+    if ($process) { $process.Dispose() }
   }
+}
+
+function Test-ShouldRunFullOcrScan {
+  if ($HighAccuracy -or $ImagePath -or $Once) { return $true }
+  $script:FastMissCount += 1
+  if ($script:FastMissCount -ge $FullScanEvery) {
+    $script:FastMissCount = 0
+    return $true
+  }
+  return $false
 }
 
 function Read-GameCoordinate($TesseractPath, $InputPath, $Region) {
@@ -1120,6 +1172,7 @@ function Read-GameCoordinate($TesseractPath, $InputPath, $Region) {
 
   $templateCoordinate = Read-GameCoordinateByTemplate $InputPath $Region
   if ($templateCoordinate -and [int]$templateCoordinate.votes -ge 7) {
+    $script:FastMissCount = 0
     return $templateCoordinate
   }
 
@@ -1167,11 +1220,16 @@ function Read-GameCoordinate($TesseractPath, $InputPath, $Region) {
       if ($env:OCR_DEBUG) {
         Write-Host ("DEBUG best {0},{1} votes={2} score={3} raw={4}" -f $best.gameX, $best.gameY, $best.votes, $best.score, $best.raw)
       }
+      $script:FastMissCount = 0
       return $best
+    }
+    if ($variantSet.fast -and -not (Test-ShouldRunFullOcrScan)) {
+      return $null
     }
   }
 
   $best = Select-BestCoordinate $candidates
+  if ($best) { $script:FastMissCount = 0 }
   if ($env:OCR_DEBUG -and $best) {
     Write-Host ("DEBUG best {0},{1} votes={2} score={3} raw={4}" -f $best.gameX, $best.gameY, $best.votes, $best.score, $best.raw)
   }
@@ -1211,7 +1269,11 @@ function New-ManualCoordinateFromText([string]$Text) {
 
 function Save-LastCandidate($Coordinate, [string]$ImagePath) {
   if (-not $Coordinate -or -not $ImagePath -or -not (Test-Path $ImagePath)) { return }
-  Copy-Item -LiteralPath $ImagePath -Destination $LastCandidatePath -Force
+  $sourcePath = (Resolve-Path -LiteralPath $ImagePath).Path
+  $targetPath = if (Test-Path $LastCandidatePath) { (Resolve-Path -LiteralPath $LastCandidatePath).Path } else { $LastCandidatePath }
+  if ($sourcePath -ne $targetPath) {
+    Copy-Item -LiteralPath $sourcePath -Destination $LastCandidatePath -Force
+  }
   $script:LastCandidateCoordinate = $Coordinate
   $script:LastCandidateAt = Get-Date
 }
@@ -1357,6 +1419,7 @@ function Reset-TrackingState {
   $script:LastSentCoordinate = $null
   $script:LastCandidateCoordinate = $null
   $script:LastCandidateAt = $null
+  $script:FastMissCount = 0
   $script:PendingCoordinate = $null
   $script:PendingCount = 0
   $script:RejectedJumpCount = 0
@@ -1488,6 +1551,11 @@ if ($NoStable) {
   Write-Host "Stable mode is off. Every recognized coordinate will be sent."
 } else {
   Write-Host "Stable mode is on. WAIT means a suspicious one-frame reading was not sent."
+}
+if ($HighAccuracy) {
+  Write-Host "High accuracy mode is on. If the game feels laggy, restart OCR and choose low load mode."
+} else {
+  Write-Host ("Low load mode is on. OCR runs every {0} seconds and full scans are limited." -f $IntervalSeconds)
 }
 Write-Host "When you enter a port and coordinates disappear, OCR will pause quietly and resume after departure."
 Write-Host "Template recognition is off by default because raw OCR is more stable for small coordinates."
