@@ -950,6 +950,56 @@ textarea:focus {
   background: #ffe8b5;
 }
 
+.calibration-records {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
+}
+
+.calibration-records p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.calibration-record {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid rgba(121, 87, 27, 0.16);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.calibration-record strong {
+  display: block;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.calibration-record span {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.calibration-record button {
+  min-height: 30px;
+  border-color: rgba(150, 50, 40, 0.22);
+  background: #fff3ef;
+  color: #9a3d30;
+}
+
+.calibration-record button:hover {
+  background: #ffe1d9;
+}
+
 .ship-position-marker {
   display: flex;
   align-items: center;

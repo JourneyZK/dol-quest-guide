@@ -9,7 +9,7 @@
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
     <script src="./data/quests.js" defer></script>
-    <script src="./app.js?v=20260521-calibration-falloff" defer></script>
+    <script src="./app.js?v=20260521-calibration-records" defer></script>
   </head>
   <body>
     <div class="shell">
@@ -149,6 +149,7 @@
                 </label>
                 <button type="submit">添加校准</button>
                 <button id="calibration-clear" type="button">清空校准</button>
+                <div class="calibration-records" id="calibration-records" aria-live="polite"></div>
               </form>
             </section>
             <ol class="steps" id="steps"></ol>

@@ -712,6 +712,7 @@
     calibrationPortList: document.querySelector("#calibration-port-list"),
     calibrationStatus: document.querySelector("#calibration-status"),
     calibrationClear: document.querySelector("#calibration-clear"),
+    calibrationRecords: document.querySelector("#calibration-records"),
     marketForm: document.querySelector("#market-form"),
     marketQuery: document.querySelector("#market-query"),
     marketResults: document.querySelector("#market-results"),
@@ -846,15 +847,17 @@
       state.calibrationAnchors = [];
       saveCalibrationAnchors();
       updateCalibrationStatus();
-      if (state.currentPosition?.gameX !== undefined && state.currentPosition?.gameY !== undefined) {
-        await updatePosition({
-          gameX: state.currentPosition.gameX,
-          gameY: state.currentPosition.gameY,
-          label: "当前船位",
-          source: "game"
-        });
-      }
+      await refreshCurrentGamePositionAfterCalibrationChange("game");
       showToast("地图校准已清空。");
+    });
+
+    els.calibrationRecords?.addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-calibration-delete]");
+      if (!button) return;
+      const removed = deleteCalibrationAnchor(button.dataset.calibrationDelete);
+      if (!removed) return;
+      await refreshCurrentGamePositionAfterCalibrationChange("game");
+      showToast(`已删除校准点：${removed.label}`);
     });
   }
 
@@ -1049,6 +1052,16 @@
     };
   }
 
+  async function refreshCurrentGamePositionAfterCalibrationChange(source = "game") {
+    if (state.currentPosition?.gameX === undefined || state.currentPosition?.gameY === undefined) return;
+    await updatePosition({
+      gameX: state.currentPosition.gameX,
+      gameY: state.currentPosition.gameY,
+      label: "当前船位",
+      source
+    });
+  }
+
   function populateCalibrationPortList() {
     if (!els.calibrationPortList) return;
     const names = uniquePorts()
@@ -1119,6 +1132,16 @@
     localStorage.setItem(CALIBRATION_STORAGE_KEY, JSON.stringify(state.calibrationAnchors));
   }
 
+  function deleteCalibrationAnchor(id) {
+    const targetId = String(id || "");
+    const removed = state.calibrationAnchors.find((anchor) => anchor.id === targetId);
+    if (!removed) return null;
+    state.calibrationAnchors = state.calibrationAnchors.filter((anchor) => anchor.id !== targetId);
+    saveCalibrationAnchors();
+    updateCalibrationStatus();
+    return removed;
+  }
+
   function normalizeCalibrationAnchor(anchor) {
     if (!anchor) return null;
     const gameX = Number(anchor.gameX);
@@ -1140,20 +1163,45 @@
   }
 
   function updateCalibrationStatus() {
-    if (!els.calibrationStatus) return;
     const count = state.calibrationAnchors.length;
-    if (!count) {
+    if (!count && els.calibrationStatus) {
       els.calibrationStatus.textContent = "未添加校准点";
+    } else if (els.calibrationStatus) {
+      const labels = state.calibrationAnchors.slice(0, 3).map((anchor) => anchor.label).join("、");
+      const hint =
+        count === 1
+          ? "；单点只修正附近"
+          : count === 2
+            ? "；再加 1 点更稳"
+            : "；区域校准";
+      els.calibrationStatus.textContent = `已校准 ${count} 点：${labels}${count > 3 ? "…" : ""}${hint}`;
+    }
+    renderCalibrationRecords();
+  }
+
+  function renderCalibrationRecords() {
+    if (!els.calibrationRecords) return;
+    if (!state.calibrationAnchors.length) {
+      els.calibrationRecords.innerHTML = '<p>还没有校准记录。</p>';
       return;
     }
-    const labels = state.calibrationAnchors.slice(0, 3).map((anchor) => anchor.label).join("、");
-    const hint =
-      count === 1
-        ? "；单点只修正附近"
-        : count === 2
-          ? "；再加 1 点更稳"
-          : "；区域校准";
-    els.calibrationStatus.textContent = `已校准 ${count} 点：${labels}${count > 3 ? "…" : ""}${hint}`;
+
+    els.calibrationRecords.innerHTML = state.calibrationAnchors
+      .map((anchor) => {
+        const created = anchor.createdAt
+          ? new Date(anchor.createdAt).toLocaleString("zh-CN", { hour12: false })
+          : "未知时间";
+        return `
+          <div class="calibration-record">
+            <div>
+              <strong>${escapeHtml(anchor.label)}</strong>
+              <span>游戏坐标 ${Math.round(anchor.gameX)}, ${Math.round(anchor.gameY)} · ${escapeHtml(created)}</span>
+            </div>
+            <button type="button" data-calibration-delete="${escapeHtml(anchor.id)}">删除</button>
+          </div>
+        `;
+      })
+      .join("");
   }
 
   function loadQuests() {
