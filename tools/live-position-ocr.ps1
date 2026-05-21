@@ -5,6 +5,7 @@ param(
   [switch]$ResetRegion,
   [switch]$NoPost,
   [switch]$NoStable,
+  [switch]$ManualScan,
   [switch]$HighAccuracy,
   [switch]$UseTemplates,
   [switch]$NoTemplates,
@@ -1461,6 +1462,7 @@ function Get-ConsoleHotkey {
   try {
     while ([Console]::KeyAvailable) {
       $key = [Console]::ReadKey($true)
+      if ($key.Key -eq [ConsoleKey]::S -or $key.Key -eq [ConsoleKey]::Spacebar) { return "scan" }
       if ($key.Key -eq [ConsoleKey]::R) { return "rechoose" }
       if ($key.Key -eq [ConsoleKey]::C) { return "clear" }
       if ($key.Key -eq [ConsoleKey]::A) { return "accept" }
@@ -1547,6 +1549,11 @@ if ($TrainText) {
 
 Write-Host ""
 Write-Host "OCR is running. Open $ServerUrl to see the ship marker."
+if ($ManualScan) {
+  Write-Host "Manual scan mode is on. Press S or Space to scan once; otherwise OCR stays idle."
+} else {
+  Write-Host ("Auto scan mode is on. OCR scans every {0} seconds." -f $IntervalSeconds)
+}
 if ($NoStable) {
   Write-Host "Stable mode is off. Every recognized coordinate will be sent."
 } else {
@@ -1559,6 +1566,7 @@ if ($HighAccuracy) {
 }
 Write-Host "When you enter a port and coordinates disappear, OCR will pause quietly and resume after departure."
 Write-Host "Template recognition is off by default because raw OCR is more stable for small coordinates."
+Write-Host "Press S or Space to scan once in manual mode."
 Write-Host "Press R to re-select the OCR area. Press C to clear the stable coordinate state."
 Write-Host "Press A to accept the last WAIT/OK coordinate and train it. Press M to type the correct coordinate for the last reading."
 Write-Host "Press T to train digit templates. Press X to clear digit templates. Press V to toggle templates."
@@ -1584,6 +1592,11 @@ do {
       Invoke-ClearTemplates
     } elseif ($hotkey -eq "toggleTemplates") {
       Invoke-ToggleTemplates
+    }
+
+    if ($ManualScan -and -not $ImagePath -and -not $Once -and $hotkey -ne "scan") {
+      Start-Sleep -Milliseconds 150
+      continue
     }
 
     if ($ImagePath) {
@@ -1618,6 +1631,10 @@ do {
   }
 
   if ($Once -or $ImagePath) { break }
+  if ($ManualScan) {
+    Start-Sleep -Milliseconds 150
+    continue
+  }
   Start-Sleep -Seconds $IntervalSeconds
   $hotkey = Get-ConsoleHotkey
   if ($hotkey -eq "rechoose") {

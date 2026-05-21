@@ -7,17 +7,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "$current=$PID; Get-CimIn
 
 echo.
 echo Choose OCR region:
-echo   1. Drag a new coordinate area (low load)
-echo   2. Reuse the saved area (low load)
-echo   3. Reuse the saved area (high accuracy, may lag)
+echo   1. Drag a new coordinate area (manual scan, smoothest)
+echo   2. Reuse the saved area (manual scan, smoothest)
+echo   3. Reuse the saved area (slow auto scan)
+echo   4. Reuse the saved area (high accuracy, may lag)
 echo.
-choice /C 123 /N /M "Press 1, 2, or 3: "
-if errorlevel 3 (
+choice /C 1234 /N /M "Press 1, 2, 3, or 4: "
+if errorlevel 4 (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\live-position-ocr.ps1" -HighAccuracy
+) else if errorlevel 3 (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\live-position-ocr.ps1" -IntervalSeconds 8
 ) else if errorlevel 2 (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\live-position-ocr.ps1"
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\live-position-ocr.ps1" -ManualScan
 ) else (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\live-position-ocr.ps1" -ResetRegion
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\live-position-ocr.ps1" -ResetRegion -ManualScan
 )
 echo.
 echo OCR stopped. You can close this window.
