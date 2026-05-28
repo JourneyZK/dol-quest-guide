@@ -1202,6 +1202,11 @@ textarea:focus {
   gap: 12px;
 }
 
+.sell-price-block {
+  display: grid;
+  gap: 12px;
+}
+
 .navigation-block {
   display: grid;
   gap: 12px;
@@ -1268,6 +1273,128 @@ textarea:focus {
 .market-form {
   display: grid;
   gap: 10px;
+}
+
+.sell-price-form {
+  display: grid;
+  gap: 10px;
+}
+
+.sell-price-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.sell-price-form input {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0 11px;
+  background: var(--surface-strong);
+  color: var(--ink);
+  outline: none;
+}
+
+.sell-price-form input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(18, 107, 99, 0.12);
+}
+
+.sell-price-results {
+  display: grid;
+  gap: 10px;
+  max-height: 360px;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.sell-price-results p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.sell-price-heading {
+  display: grid;
+  gap: 4px;
+}
+
+.sell-price-heading strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.sell-price-heading span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sell-price-list {
+  display: grid;
+  gap: 6px;
+}
+
+.sell-price-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px;
+  background: var(--surface-strong);
+}
+
+.sell-price-row.best {
+  border-color: rgba(183, 126, 50, 0.55);
+  background: rgba(183, 126, 50, 0.08);
+}
+
+.sell-price-row strong,
+.sell-price-row em,
+.sell-price-row b {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.sell-price-row strong {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.sell-price-row em {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.sell-price-row b {
+  color: var(--accent-strong);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.sell-price-row button {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 5px 7px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.sell-price-row button:hover {
+  border-color: rgba(156, 59, 44, 0.45);
+  color: #9c3b2c;
 }
 
 .market-mode {

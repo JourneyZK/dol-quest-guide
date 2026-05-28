@@ -9,7 +9,7 @@
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
     <script src="./data/quests.js" defer></script>
-    <script src="./app.js?v=20260522-north-sea-navigation" defer></script>
+    <script src="./app.js?v=20260528-sell-price-ledger" defer></script>
   </head>
   <body>
     <div class="shell">
@@ -198,6 +198,35 @@
               </form>
               <div class="market-results" id="market-results">
                 <p>输入物品名可查哪里出售；输入港口名可查当地卖什么。</p>
+              </div>
+            </section>
+            <section class="detail-block sell-price-block">
+              <h3>卖价行情</h3>
+              <form class="sell-price-form" id="sell-price-form">
+                <label>
+                  商品
+                  <input id="sell-price-item" type="search" placeholder="猪肉 / 豚肉" />
+                </label>
+                <label>
+                  港口
+                  <input id="sell-price-port" list="sell-price-port-list" type="search" placeholder="伦敦 / ロンドン" />
+                </label>
+                <label>
+                  卖出单价
+                  <input id="sell-price-value" type="number" min="1" step="1" placeholder="例如 1280" />
+                </label>
+                <datalist id="sell-price-port-list"></datalist>
+                <button class="secondary-action" type="submit">
+                  <i data-lucide="trending-up" aria-hidden="true"></i>
+                  记录卖价
+                </button>
+                <button class="secondary-action" id="sell-price-clear" type="button">
+                  <i data-lucide="trash-2" aria-hidden="true"></i>
+                  清空当前商品
+                </button>
+              </form>
+              <div class="sell-price-results" id="sell-price-results">
+                <p>录入各港卖出单价后，会自动按最高价排序。</p>
               </div>
             </section>
             <section class="detail-block">

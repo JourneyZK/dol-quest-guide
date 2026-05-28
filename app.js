@@ -1,6 +1,7 @@
 (function () {
   const STORAGE_KEY = "uw-quest-guide-library";
   const CALIBRATION_STORAGE_KEY = "uw-quest-guide-map-calibrations";
+  const SELL_PRICE_STORAGE_KEY = "uw-quest-guide-sell-prices";
   const TYPE_LABELS = {
     all: "全部",
     trade: "交易",
@@ -830,6 +831,13 @@
     marketForm: document.querySelector("#market-form"),
     marketQuery: document.querySelector("#market-query"),
     marketResults: document.querySelector("#market-results"),
+    sellPriceForm: document.querySelector("#sell-price-form"),
+    sellPriceItem: document.querySelector("#sell-price-item"),
+    sellPricePort: document.querySelector("#sell-price-port"),
+    sellPriceValue: document.querySelector("#sell-price-value"),
+    sellPricePortList: document.querySelector("#sell-price-port-list"),
+    sellPriceResults: document.querySelector("#sell-price-results"),
+    sellPriceClear: document.querySelector("#sell-price-clear"),
     steps: document.querySelector("#steps"),
     prepList: document.querySelector("#prep-list"),
     notesList: document.querySelector("#notes-list"),
@@ -848,6 +856,7 @@
     currentPlan: null,
     currentPosition: null,
     calibrationAnchors: loadCalibrationAnchors(),
+    sellPrices: loadSellPrices(),
     leafletMap: null,
     shipMarker: null,
     positionPollTimer: null,
@@ -866,9 +875,12 @@
     bindPositionControls();
     populateCalibrationPortList();
     populateNavigationPortList();
+    populateSellPricePortList();
     updateCalibrationStatus();
     bindNavigationControls();
     bindMarketControls();
+    bindSellPriceControls();
+    renderSellPriceResults();
     startPositionPolling();
     initializeCalibrationSync();
 
@@ -1064,6 +1076,74 @@
     `;
   }
 
+  function bindSellPriceControls() {
+    els.sellPriceForm?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const item = els.sellPriceItem?.value.trim() || "";
+      const portQuery = els.sellPricePort?.value.trim() || "";
+      const price = Number(els.sellPriceValue?.value);
+      if (!item) {
+        showToast("请输入商品名。");
+        els.sellPriceItem?.focus();
+        return;
+      }
+      if (!portQuery) {
+        showToast("请输入港口名。");
+        els.sellPricePort?.focus();
+        return;
+      }
+      if (!Number.isFinite(price) || price <= 0) {
+        showToast("请输入有效卖出单价。");
+        els.sellPriceValue?.focus();
+        return;
+      }
+
+      const port = resolveNavigationPort(portQuery);
+      if (!port) {
+        showToast("没有找到这个港口，请换中文名或日文名。");
+        els.sellPricePort?.focus();
+        return;
+      }
+
+      upsertSellPriceRecord({
+        item,
+        port: port.label,
+        price: Math.round(price),
+        createdAt: new Date().toISOString()
+      });
+      els.sellPriceValue.value = "";
+      renderSellPriceResults(item);
+      showToast(`已记录：${item} 在 ${port.label} 卖出 ${Math.round(price)}`);
+    });
+
+    els.sellPriceItem?.addEventListener("input", () => {
+      renderSellPriceResults(els.sellPriceItem.value.trim());
+    });
+
+    els.sellPriceClear?.addEventListener("click", () => {
+      const item = els.sellPriceItem?.value.trim() || "";
+      if (!item) {
+        showToast("先输入要清空的商品名。");
+        return;
+      }
+      const key = normalize(item);
+      const before = state.sellPrices.length;
+      state.sellPrices = state.sellPrices.filter((record) => record.itemKey !== key);
+      saveSellPrices();
+      renderSellPriceResults(item);
+      showToast(before === state.sellPrices.length ? "当前商品没有行情记录。" : `已清空 ${item} 的卖价记录。`);
+    });
+
+    els.sellPriceResults?.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-sell-price-delete]");
+      if (!button) return;
+      const removed = deleteSellPriceRecord(button.dataset.sellPriceDelete);
+      if (!removed) return;
+      renderSellPriceResults(els.sellPriceItem?.value.trim() || removed.item);
+      showToast(`已删除 ${removed.item} 在 ${removed.port} 的卖价。`);
+    });
+  }
+
   function renderMarketLoading(mode, query) {
     if (!els.marketResults) return;
     els.marketResults.innerHTML = `<p>正在查询 ${escapeHtml(query)}...</p>`;
@@ -1252,6 +1332,17 @@
       .join("");
   }
 
+  function populateSellPricePortList() {
+    if (!els.sellPricePortList) return;
+    const names = uniquePorts()
+      .map(({ key, coord }) => coord.label || key)
+      .filter(Boolean)
+      .sort((left, right) => left.localeCompare(right, "zh-CN"));
+    els.sellPricePortList.innerHTML = names
+      .map((name) => `<option value="${escapeHtml(name)}"></option>`)
+      .join("");
+  }
+
   function resolveNavigationPort(query) {
     const target = resolveCalibrationPort(query);
     if (!target) return null;
@@ -1432,6 +1523,141 @@
       source: "calibration",
       createdAt: anchor.createdAt || new Date().toISOString()
     };
+  }
+
+  function loadSellPrices() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(SELL_PRICE_STORAGE_KEY));
+      if (!Array.isArray(saved)) return [];
+      return saved
+        .map(normalizeSellPriceRecord)
+        .filter(Boolean)
+        .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))
+        .slice(0, 300);
+    } catch (error) {
+      console.warn("Failed to load sell price records", error);
+      return [];
+    }
+  }
+
+  function saveSellPrices() {
+    localStorage.setItem(SELL_PRICE_STORAGE_KEY, JSON.stringify(state.sellPrices));
+  }
+
+  function normalizeSellPriceRecord(record) {
+    if (!record) return null;
+    const item = String(record.item || "").trim().slice(0, 40);
+    const port = String(record.port || "").trim().slice(0, 40);
+    const price = Math.round(Number(record.price));
+    if (!item || !port || !Number.isFinite(price) || price <= 0) return null;
+    const itemKey = normalize(item);
+    const portKey = normalize(port);
+    return {
+      id: String(record.id || `${itemKey}-${portKey}`).slice(0, 100),
+      item,
+      itemKey,
+      port,
+      portKey,
+      price,
+      createdAt: record.createdAt || new Date().toISOString()
+    };
+  }
+
+  function upsertSellPriceRecord(record) {
+    const normalized = normalizeSellPriceRecord(record);
+    if (!normalized) return null;
+    state.sellPrices = [
+      normalized,
+      ...state.sellPrices.filter(
+        (item) => !(item.itemKey === normalized.itemKey && item.portKey === normalized.portKey)
+      )
+    ].slice(0, 300);
+    saveSellPrices();
+    return normalized;
+  }
+
+  function deleteSellPriceRecord(id) {
+    const targetId = String(id || "");
+    const removed = state.sellPrices.find((record) => record.id === targetId);
+    if (!removed) return null;
+    state.sellPrices = state.sellPrices.filter((record) => record.id !== targetId);
+    saveSellPrices();
+    return removed;
+  }
+
+  function renderSellPriceResults(query = els.sellPriceItem?.value.trim() || "") {
+    if (!els.sellPriceResults) return;
+    const key = normalize(query);
+    if (!state.sellPrices.length) {
+      els.sellPriceResults.innerHTML = "<p>还没有卖价记录。到交易所看到卖出单价后，把商品、港口和价格记在这里。</p>";
+      return;
+    }
+
+    if (!key) {
+      const recent = state.sellPrices.slice(0, 8);
+      els.sellPriceResults.innerHTML = `
+        <div class="sell-price-heading">
+          <strong>最近记录</strong>
+          <span>输入商品名可查看各港卖价排行</span>
+        </div>
+        <div class="sell-price-list">
+          ${recent.map((record) => buildSellPriceRow(record, { showItem: true })).join("")}
+        </div>
+      `;
+      return;
+    }
+
+    const records = state.sellPrices
+      .filter((record) => record.itemKey === key)
+      .sort((left, right) => right.price - left.price || new Date(right.createdAt) - new Date(left.createdAt));
+    if (!records.length) {
+      els.sellPriceResults.innerHTML = `<p>还没有 ${escapeHtml(query)} 的卖价记录。</p>`;
+      return;
+    }
+
+    const best = records[0];
+    els.sellPriceResults.innerHTML = `
+      <div class="sell-price-heading">
+        <strong>${escapeHtml(best.item)} 最高：${escapeHtml(best.port)}</strong>
+        <span>${formatMoney(best.price)} / 单位 · 共 ${records.length} 个港口</span>
+      </div>
+      <div class="sell-price-list">
+        ${records.map((record, index) => buildSellPriceRow(record, { rank: index + 1 })).join("")}
+      </div>
+    `;
+  }
+
+  function buildSellPriceRow(record, options = {}) {
+    const rank = options.rank ? `${options.rank}. ` : "";
+    const title = options.showItem ? `${record.item} · ${record.port}` : `${rank}${record.port}`;
+    return `
+      <div class="sell-price-row ${options.rank === 1 ? "best" : ""}">
+        <span>
+          <strong>${escapeHtml(title)}</strong>
+          <em>${escapeHtml(formatSellPriceTime(record.createdAt))}</em>
+        </span>
+        <b>${escapeHtml(formatMoney(record.price))}</b>
+        <button type="button" data-sell-price-delete="${escapeHtml(record.id)}" aria-label="删除卖价记录">
+          删除
+        </button>
+      </div>
+    `;
+  }
+
+  function formatMoney(value) {
+    return Math.round(Number(value) || 0).toLocaleString("zh-CN");
+  }
+
+  function formatSellPriceTime(value) {
+    const date = value ? new Date(value) : null;
+    if (!date || Number.isNaN(date.getTime())) return "未知时间";
+    return date.toLocaleString("zh-CN", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    });
   }
 
   function updateCalibrationStatus() {
