@@ -825,6 +825,7 @@
     calibrationRecords: document.querySelector("#calibration-records"),
     navigationForm: document.querySelector("#navigation-form"),
     navigationFrom: document.querySelector("#navigation-from"),
+    navigationVia: document.querySelector("#navigation-via"),
     navigationTo: document.querySelector("#navigation-to"),
     navigationPortList: document.querySelector("#navigation-port-list"),
     navigationResults: document.querySelector("#navigation-results"),
@@ -1029,6 +1030,7 @@
     els.navigationForm?.addEventListener("submit", (event) => {
       event.preventDefault();
       const fromQuery = els.navigationFrom?.value.trim() || "";
+      const viaQuery = els.navigationVia?.value.trim() || "";
       const toQuery = els.navigationTo?.value.trim() || "";
       if (!fromQuery || !toQuery) {
         showToast("请输入出发港和目的港。");
@@ -1047,29 +1049,43 @@
         els.navigationTo?.focus();
         return;
       }
+      const viaResult = resolveNavigationViaPorts(viaQuery);
+      if (!viaResult.ok) {
+        showToast(`没有找到途径港：${viaResult.missing.join("、")}`);
+        els.navigationVia?.focus();
+        return;
+      }
+
+      const routePorts = [from, ...viaResult.ports, to];
+      const repeated = findRepeatedAdjacentPort(routePorts);
+      if (repeated) {
+        showToast(`${repeated} 连续出现了两次，请调整途径港。`);
+        return;
+      }
       if (geoKey(from.coord) === geoKey(to.coord)) {
         showToast("出发港和目的港不能相同。");
         return;
       }
 
-      const plan = buildNavigationPlan(from, to);
+      const plan = buildNavigationPlan(routePorts);
       renderPlan(plan, {
-        status: `港口导航：${from.label} → ${to.label}`,
+        status: `港口导航：${routePorts.map((port) => port.label).join(" → ")}`,
         source: "navigation"
       });
-      renderNavigationResult(from, to, buildRouteContext(plan));
+      renderNavigationResult(routePorts, buildRouteContext(plan));
       showToast("已生成港口导航路线。");
     });
   }
 
-  function renderNavigationResult(from, to, routeContext) {
+  function renderNavigationResult(routePorts, routeContext) {
     if (!els.navigationResults) return;
     const routePlan = routeContext?.routePlan;
     const waypointCount = routePlan?.points?.length || 2;
     const seaGuide = routePlan?.hasWaypoints ? buildSeaRouteItinerary(routePlan) : "";
+    const routeText = routePorts.map((port) => port.label).join(" → ");
     els.navigationResults.innerHTML = `
       <div class="navigation-summary">
-        <strong>${escapeHtml(from.label)} → ${escapeHtml(to.label)}</strong>
+        <strong>${escapeHtml(routeText)}</strong>
         <span>${waypointCount} 个航路点</span>
       </div>
       ${seaGuide || "<p>两个港口距离较近，可按地图直航。</p>"}
@@ -1352,21 +1368,61 @@
     };
   }
 
-  function buildNavigationPlan(from, to) {
-    const routePlan = buildSailingRoutePlan([
-      { name: from.label, index: 0, coord: from.coord },
-      { name: to.label, index: 1, coord: to.coord }
-    ]);
+  function resolveNavigationViaPorts(text) {
+    const names = splitNavigationViaPorts(text);
+    const ports = [];
+    const missing = [];
+    names.forEach((name) => {
+      const port = resolveNavigationPort(name);
+      if (port) {
+        ports.push(port);
+      } else {
+        missing.push(name);
+      }
+    });
+    return {
+      ok: missing.length === 0,
+      ports,
+      missing
+    };
+  }
+
+  function splitNavigationViaPorts(text) {
+    return String(text || "")
+      .split(/[\n\r,，、;；>\u2192\s]+/g)
+      .map((name) => name.trim())
+      .filter(Boolean);
+  }
+
+  function findRepeatedAdjacentPort(routePorts) {
+    for (let index = 1; index < routePorts.length; index += 1) {
+      if (geoKey(routePorts[index - 1].coord) === geoKey(routePorts[index].coord)) return routePorts[index].label;
+    }
+    return "";
+  }
+
+  function buildNavigationPlan(routePorts) {
+    const from = routePorts[0];
+    const to = routePorts[routePorts.length - 1];
+    const viaPorts = routePorts.slice(1, -1);
+    const routePlan = buildSailingRoutePlan(
+      routePorts.map((port, index) => ({ name: port.label, index, coord: port.coord }))
+    );
     const routeGuide = routePlan?.hasWaypoints ? buildNavigationSailingGuidance(routePlan) : "";
     const directGuide = routeGuide || `从${from.label}出航后，按地图航线前往${to.label}。`;
+    const viaStep = viaPorts.length
+      ? `按顺序途经${viaPorts.map((port) => port.label).join("、")}；每到一个途径港后，再继续下一段航线。`
+      : "";
+    const routeLabels = routePorts.map((port) => port.label);
     return {
-      id: `navigation-${normalize(from.label)}-${normalize(to.label)}-${Date.now()}`,
+      id: `navigation-${routeLabels.map((label) => normalize(label)).join("-")}-${Date.now()}`,
       type: "generic",
       version: "港口导航",
-      title: `${from.label} 到 ${to.label}`,
+      title: routeLabels.join(" 到 "),
       aliases: [],
       start: from.label,
       destination: to.label,
+      routeStops: routeLabels,
       npc: "无",
       estimatedTime: routePlan?.hasWaypoints ? "按航路点分段航行" : "短程航行",
       difficulty: "按海域情况调整",
@@ -1376,8 +1432,9 @@
       steps: [
         `在${from.label}出航前补给水粮，并检查船帆耐久。`,
         directGuide,
+        viaStep,
         `抵达${to.label}附近后沿海岸线确认港口光点，靠港完成导航。`
-      ],
+      ].filter(Boolean),
       notes: [
         "红色实线为推荐主航路，红色虚线表示从海上航路点接近港口。",
         "如果目的港尚未发现，抵达最后一个航路点后沿海岸线低速搜索。",
@@ -2387,6 +2444,13 @@
   }
 
   function extractRouteStops(plan) {
+    if (Array.isArray(plan.routeStops) && plan.routeStops.length) {
+      return plan.routeStops
+        .map((stop) => cleanStopName(stop))
+        .filter(Boolean)
+        .filter((stop, index, stops) => stop !== stops[index - 1]);
+    }
+
     const stops = [];
     const addStop = (value) => {
       const cleaned = cleanStopName(value);

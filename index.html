@@ -9,7 +9,7 @@
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
     <script src="./data/quests.js" defer></script>
-    <script src="./app.js?v=20260528-sell-price-ledger" defer></script>
+    <script src="./app.js?v=20260528-navigation-via-ports" defer></script>
   </head>
   <body>
     <div class="shell">
@@ -164,6 +164,10 @@
                   <input id="navigation-from" list="navigation-port-list" type="search" placeholder="伦敦 / ロンドン" />
                 </label>
                 <label>
+                  途径港
+                  <input id="navigation-via" list="navigation-port-list" type="search" placeholder="汉堡、哥本哈根，可留空" />
+                </label>
+                <label>
                   目的港
                   <input id="navigation-to" list="navigation-port-list" type="search" placeholder="哥本哈根 / コペンハーゲン" />
                 </label>
@@ -174,7 +178,7 @@
                 </button>
               </form>
               <div class="navigation-results" id="navigation-results">
-                <p>选择两个港口后，会生成推荐航线和航路点。</p>
+                <p>选择起点、终点，也可以加入多个途径港。</p>
               </div>
             </section>
             <section class="detail-block market-block">
