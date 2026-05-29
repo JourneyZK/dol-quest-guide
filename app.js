@@ -2664,22 +2664,22 @@
           {
             color: "#c24b35",
             dashArray: "4 6",
-            opacity: 0.68,
-            weight: 2.5
+            opacity: 0.62,
+            weight: 1.6
           }
         ).addTo(layer);
       });
 
     window.L.polyline(latLngs, {
       color: "#ffffff",
-      opacity: 0.84,
-      weight: 8
+      opacity: 0.78,
+      weight: 5
     }).addTo(layer);
     window.L.polyline(latLngs, {
       color: "#c24b35",
       lineJoin: "round",
-      opacity: 0.96,
-      weight: 4
+      opacity: 0.94,
+      weight: 2.6
     }).addTo(layer);
 
     routePoints

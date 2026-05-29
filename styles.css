@@ -722,14 +722,14 @@ textarea:focus {
 .route-segment-shadow {
   stroke: rgba(23, 33, 31, 0.24);
   stroke-linecap: round;
-  stroke-width: 8;
+  stroke-width: 5;
 }
 
 .route-segment {
   marker-end: url(#routeArrow);
   stroke: #c24b35;
   stroke-linecap: round;
-  stroke-width: 4.5;
+  stroke-width: 2.7;
 }
 
 .approach-route {
@@ -738,7 +738,7 @@ textarea:focus {
   stroke: #c24b35;
   stroke-dasharray: 5 6;
   stroke-linecap: round;
-  stroke-width: 2.2;
+  stroke-width: 1.6;
 }
 
 .sea-waypoint circle {
