@@ -1436,7 +1436,7 @@
         `抵达${to.label}附近后沿海岸线确认港口光点，靠港完成导航。`
       ].filter(Boolean),
       notes: [
-        "红色实线为推荐主航路，红色虚线表示从海上航路点接近港口。",
+        "红色实线为推荐航线，端点会落在出发港、途径港和目的港。",
         "如果目的港尚未发现，抵达最后一个航路点后沿海岸线低速搜索。",
         "实时船位开启后会叠加在同一张地图上。"
       ],
@@ -2652,23 +2652,6 @@
     const layer = window.L.layerGroup();
     const routePoints = routePlan?.points?.length ? routePlan.points : knownStops.map((stop) => stop.coord);
     const latLngs = routePoints.map((point) => [point.lat, point.lon]);
-    routePoints
-      .filter((point) => point.kind === "port" && Number.isFinite(point.actualLat) && Number.isFinite(point.actualLon))
-      .filter((point) => Math.abs(point.actualLat - point.lat) > 0.01 || Math.abs(point.actualLon - point.lon) > 0.01)
-      .forEach((point) => {
-        window.L.polyline(
-          [
-            [point.actualLat, point.actualLon],
-            [point.lat, point.lon]
-          ],
-          {
-            color: "#c24b35",
-            dashArray: "4 6",
-            opacity: 0.62,
-            weight: 1.6
-          }
-        ).addTo(layer);
-      });
 
     window.L.polyline(latLngs, {
       color: "#ffffff",
@@ -2781,13 +2764,10 @@
 
   function asRoutePort(stop) {
     const accessLabels = portOffshoreLabels(stop.coord);
-    const accessPoint = accessLabels.map((label) => SEA_WAYPOINTS[label]).find(Boolean);
     return {
-      ...(accessPoint || stop.coord),
+      ...stop.coord,
       label: stop.coord.label || stop.name,
       kind: "port",
-      actualLat: stop.coord.lat,
-      actualLon: stop.coord.lon,
       routeAccessLabels: accessLabels,
       stopIndex: stop.index
     };
@@ -3216,15 +3196,6 @@
     const oceanLabels = buildOceanLabels();
     const ports = buildMapPortDots(routePointKeys);
     const routePoints = routePlan?.points?.length ? routePlan.points : knownStops.map((stop) => stop.coord);
-    const approachPaths = routePoints
-      .filter((point) => point.kind === "port" && Number.isFinite(point.actualLat) && Number.isFinite(point.actualLon))
-      .filter((point) => Math.abs(point.actualLat - point.lat) > 0.01 || Math.abs(point.actualLon - point.lon) > 0.01)
-      .map((point) => {
-        const actual = projectLonLat(point.actualLon, point.actualLat);
-        const access = projectLonLat(point.lon, point.lat);
-        return `<path class="approach-route" d="M ${actual.x} ${actual.y} L ${access.x} ${access.y}"></path>`;
-      })
-      .join("");
     const waypointMarkers = routePoints
       .filter((point) => point.kind === "waypoint")
       .map(
@@ -3283,7 +3254,6 @@
         ${oceanLabels}
         ${land}
         ${ports}
-        ${approachPaths}
         ${segments}
         ${waypointMarkers}
         ${markers}

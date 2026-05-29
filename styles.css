@@ -732,15 +732,6 @@ textarea:focus {
   stroke-width: 2.7;
 }
 
-.approach-route {
-  fill: none;
-  opacity: 0.68;
-  stroke: #c24b35;
-  stroke-dasharray: 5 6;
-  stroke-linecap: round;
-  stroke-width: 1.6;
-}
-
 .sea-waypoint circle {
   fill: #fff;
   stroke: #2f6d74;
